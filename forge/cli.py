@@ -1,0 +1,140 @@
+import typer
+import asyncio
+import logging
+import sys
+import platform
+import shutil
+from typing import Optional
+from forge.router.engine import router
+from forge.ui.console import console, display_welcome, display_response, display_status
+from forge.config.settings import settings, SHARED_ENV_PATH
+
+app = typer.Typer(
+    help="🛠️ Forge: High-performance AI Router & Interactive CLI",
+    add_completion=False,
+)
+
+@app.callback(invoke_without_command=True)
+def main_callback(ctx: typer.Context):
+    """🛠️ Forge: High-performance AI Router & Interactive CLI"""
+    if ctx.invoked_subcommand is None:
+        from forge.chat import ForgeChat
+        chat_app = ForgeChat()
+        asyncio.run(chat_app.start())
+        raise typer.Exit()
+
+@app.command()
+def ask(
+    prompt: str = typer.Argument(..., help="The question to ask"),
+    model: Optional[str] = typer.Option(None, "--model", "-m", help="Force a specific model"),
+    timeout: int = typer.Option(settings.timeout, "--timeout", "-t", help="Timeout in seconds")
+):
+    """Ask a single question and get a response."""
+    async def _ask():
+        from forge.ui.console import ThinkingDisplay, Live
+        try:
+            thinking = ThinkingDisplay(initial_provider=model or "Auto")
+            with Live(thinking, refresh_per_second=10):
+                response = await router.route(
+                    prompt, 
+                    preferred=model, 
+                    timeout=timeout,
+                    on_progress=thinking.update
+                )
+            display_response(response.content, response.provider, response.model)
+        except Exception as e:
+            console.print(f"[error]Error:[/error] {str(e)}")
+
+    asyncio.run(_ask())
+
+@app.command()
+def chat(
+    model: Optional[str] = typer.Option(None, "--model", "-m", help="Force a specific model")
+):
+    """Start an interactive chat session."""
+    from forge.chat import ForgeChat
+    chat_app = ForgeChat(preferred_model=model)
+    asyncio.run(chat_app.start())
+
+@app.command()
+def status():
+    """Check the status and health of all providers."""
+    async def _status():
+        with console.status("[bold cyan]Checking provider health..."):
+            results = await router.get_status()
+        display_status(results)
+
+    asyncio.run(_status())
+
+@app.command()
+def doctor():
+    """Diagnose configuration and environment issues."""
+    console.print("\n[bold info]⚒️ Forge Diagnosis Report[/bold info]\n")
+    
+    # 1. System Info
+    console.print(f"[bold]System:[/bold]")
+    console.print(f"  Python Version: {sys.version.split()[0]}")
+    console.print(f"  OS: {platform.system()} ({platform.release()})")
+    
+    # 2. Environment Info
+    console.print(f"\n[bold]Environment:[/bold]")
+    if SHARED_ENV_PATH.exists():
+        console.print(f"  [success]✓[/success] Credentials found at: {SHARED_ENV_PATH}")
+    else:
+        console.print(f"  [error]✗[/error] Credentials NOT found at: {SHARED_ENV_PATH}")
+    
+    # 3. Key Detection
+    console.print(f"\n[bold]API Keys:[/bold]")
+    keys = {
+        "Gemini": settings.gemini_api_key,
+        "Groq": settings.groq_api_key,
+        "OpenAI": settings.openai_api_key,
+        "GitHub Token": settings.github_token,
+    }
+    for name, value in keys.items():
+        status = "[success]✓ detected[/success]" if value else "[error]✗ missing[/error]"
+        console.print(f"  {name.ljust(15)}: {status}")
+
+    # 4. Tool Detection
+    console.print(f"\n[bold]External Tools:[/bold]")
+    tools = ["gemini", "copilot", "ollama", "forge"]
+    for cmd in tools:
+        path = shutil.which(cmd)
+        status = f"[success]✓ found[/success] ({path})" if path else "[warning]! not found[/warning]"
+        console.print(f"  {cmd.ljust(15)}: {status}")
+
+    # 5. Provider Health
+    console.print(f"\n[bold]Provider Health:[/bold]")
+    async def run_health_checks():
+        results = await router.get_status()
+        for name, stat in results.items():
+            if stat["ok"]:
+                console.print(f"  [success]✓[/success] {name.ljust(10)}: READY")
+            else:
+                console.print(f"  [error]✗[/error] {name.ljust(10)}: FAILED ({stat.get('reason')})")
+
+    asyncio.run(run_health_checks())
+    console.print("\n[info]Diagnosis complete.[/info]\n")
+
+@app.command()
+def test():
+    """Run automated tests."""
+    import pytest
+    console.print("[info]Running Forge Tests...[/info]")
+    sys.exit(pytest.main(["tests"]))
+
+@app.command()
+def models():
+    """List all supported models and their current status."""
+    status()
+
+def main():
+    """Entry point for the console script."""
+    try:
+        app()
+    except Exception as e:
+        print(f"Fatal Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,39 @@
+[project]
+name = "forge-router"
+version = "0.1.0"
+description = "🛠️ Forge: A high-performance AI Router & Interactive CLI in Python."
+authors = [
+    { name = "Vikash", email = "vikash@example.com" }
+]
+dependencies = [
+    "typer>=0.12.3",
+    "rich>=13.7.1",
+    "prompt-toolkit>=3.0.43",
+    "pydantic-settings>=2.2.1",
+    "httpx>=0.27.0",
+    "asyncio>=3.4.3",
+    "pyyaml>=6.0.1",
+    "python-dotenv>=1.0.1",
+]
+readme = "README.md"
+requires-python = ">=3.13"
+
+[project.scripts]
+forge = "forge.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["forge"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3",
+    "pytest-asyncio>=1.4.0",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
