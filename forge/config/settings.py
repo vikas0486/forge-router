@@ -62,6 +62,9 @@ class Settings(BaseSettings):
 
     # Anthropic
     anthropic_api_key: Optional[str] = None
+
+    # Perplexity (Sonar)
+    perplexity_api_key: Optional[str] = None
     
     # Ollama
     ollama_base_url: str = "http://localhost:11434"
