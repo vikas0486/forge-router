@@ -119,6 +119,10 @@ graph LR
 
 ## Installation
 
+> 🪟 **On Windows?** Follow the **[Windows Runbook](runbook_4_Windows.md)** instead — it
+> covers the venv setup, the required UTF-8 console fix, and Windows-specific gotchas
+> step by step. Copy `.env.example` → `.env` and add your keys.
+
 ```bash
 # Clone
 git clone https://github.com/vikash/forge-router.git
@@ -131,7 +135,7 @@ pipx install .
 uv sync && uv pip install -e .
 ```
 
-Configure credentials in `~/.devo/credentials` or `.env`:
+Configure credentials in `~/.devo/credentials` or `.env` (copy `.env.example` to start):
 
 ```env
 ANTIGRAVITY_API_KEY=...
