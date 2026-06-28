@@ -62,7 +62,7 @@ def classify_intent(prompt: str) -> str:
 
 # Maps intent → ordered list of preferred provider names
 _INTENT_ROUTING: Dict[str, List[str]] = {
-    "code":          ["codex", "claude", "hermes", "openai", "groq", "ollama"],
+    "code":          ["ollama", "codex", "claude", "hermes", "openai", "groq"],
     "reasoning":     ["hermes", "claude", "openai", "groq", "sakana", "antigravity", "ollama"],
     "agentic":       ["claude", "openai", "hermes", "groq", "antigravity", "ollama"],
     "summarization": ["antigravity", "groq", "claude", "openai", "ollama"],
