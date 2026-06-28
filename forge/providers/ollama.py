@@ -20,7 +20,7 @@ _OLLAMA_DEFAULT = ["qwen3:latest", "mistral:latest", "llama3.1:8b", "deepseek-r1
 # is configured. Each falls back to gpt-oss:120b, then to local models.
 _OLLAMA_CLOUD_INTENT_MODELS: Dict[str, List[str]] = {
     "code":          ["qwen3-coder:480b", "gpt-oss:120b"],
-    "reasoning":     ["gpt-oss:20b"],
+    "reasoning":     ["gpt-oss:120b"],
     "agentic":       ["gpt-oss:120b"],
     "summarization": ["gpt-oss:120b", "gpt-oss:20b"],
     "chat":          ["gpt-oss:120b", "gpt-oss:20b"],
