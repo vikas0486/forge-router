@@ -58,12 +58,17 @@ class OllamaProvider(BaseProvider):
         return available[0] if available else None
 
     def _classify_intent(self, prompt: str) -> str:
-        # Intent is carried in the prompt prefix block if injected by router; extract if possible
+        # Reuse the router's classifier so the provider's model choice matches the
+        # intent that routed the request here (lazy import avoids a circular dep).
+        try:
+            from forge.router.engine import classify_intent
+            return classify_intent(prompt)
+        except Exception:
+            pass
+        # Fallback heuristic if the router isn't importable for some reason.
         intent = "chat"
-        if "[FORGE MEMORY" in prompt or prompt.startswith("USER:"):
-            intent = "chat"
         for kw, cat in [("def ", "code"), ("class ", "code"), ("import ", "code"),
-                         ("reason", "reasoning"), ("explain why", "reasoning"),
+                         ("function", "code"), ("reason", "reasoning"), ("explain why", "reasoning"),
                          ("summarize", "summarization"), ("summary", "summarization")]:
             if kw.lower() in prompt.lower():
                 intent = cat

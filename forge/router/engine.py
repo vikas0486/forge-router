@@ -23,7 +23,7 @@ logger = logging.getLogger("forge.router")
 _INTENT_TIMEOUT: Dict[str, int] = {
     "chat":          15,
     "summarization": 20,
-    "code":          30,
+    "code":          90,   # ollama-primary: allow cold-start of large coder models (qwen3-coder:480b)
     "reasoning":     45,
     "agentic":       60,
 }
