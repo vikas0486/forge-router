@@ -66,6 +66,8 @@ class Settings(BaseSettings):
     # Ollama
     ollama_base_url: str = "http://localhost:11434"
     ollama_model: str = "llama3"
+    ollama_api_key: Optional[str] = None        # Ollama Cloud (Turbo) — enables hosted models
+    ollama_cloud_url: str = "https://ollama.com"
     
     # App Settings
     debug: bool = False

@@ -16,12 +16,25 @@ _OLLAMA_INTENT_MODELS: Dict[str, List[str]] = {
 }
 _OLLAMA_DEFAULT = ["qwen3:latest", "mistral:latest", "llama3.1:8b", "deepseek-r1:8b"]
 
+# Intent → ordered Ollama Cloud (Turbo) model preference. Used when an API key
+# is configured. Each falls back to gpt-oss:120b, then to local models.
+_OLLAMA_CLOUD_INTENT_MODELS: Dict[str, List[str]] = {
+    "code":          ["qwen3-coder:480b", "gpt-oss:120b"],
+    "reasoning":     ["deepseek-v3.1:671b", "gpt-oss:120b"],
+    "agentic":       ["gpt-oss:120b"],
+    "summarization": ["gpt-oss:120b", "gpt-oss:20b"],
+    "chat":          ["gpt-oss:120b", "gpt-oss:20b"],
+}
+_OLLAMA_CLOUD_DEFAULT = "gpt-oss:120b"
+
 
 class OllamaProvider(BaseProvider):
     def __init__(self):
         super().__init__(name="ollama", priority=7)
         self._base = settings.ollama_base_url
         self._available: List[str] = []
+        self._cloud_key = settings.ollama_api_key
+        self._cloud_base = settings.ollama_cloud_url.rstrip("/")
 
     async def _get_available(self) -> List[str]:
         if self._available:
@@ -44,11 +57,7 @@ class OllamaProvider(BaseProvider):
                 return m
         return available[0] if available else None
 
-    async def generate(self, prompt: str, image: Optional[Dict[str, Any]] = None, timeout: int = 90) -> ProviderResponse:
-        available = await self._get_available()
-        if not available:
-            raise ValueError("No Ollama models available")
-
+    def _classify_intent(self, prompt: str) -> str:
         # Intent is carried in the prompt prefix block if injected by router; extract if possible
         intent = "chat"
         if "[FORGE MEMORY" in prompt or prompt.startswith("USER:"):
@@ -59,13 +68,14 @@ class OllamaProvider(BaseProvider):
             if kw.lower() in prompt.lower():
                 intent = cat
                 break
+        return intent
 
-        model = self._best_model(available, intent)
-        logger.info(f"[ollama] intent={intent} → model={model}")
-
+    async def _chat(self, base: str, model: str, prompt: str, timeout: int, auth: bool = False) -> str:
+        headers = {"Authorization": f"Bearer {self._cloud_key}"} if auth else {}
         async with httpx.AsyncClient(timeout=timeout) as client:
             resp = await client.post(
-                f"{self._base}/api/chat",
+                f"{base}/api/chat",
+                headers=headers,
                 json={
                     "model": model,
                     "messages": [{"role": "user", "content": prompt}],
@@ -74,12 +84,40 @@ class OllamaProvider(BaseProvider):
             )
             if resp.status_code != 200:
                 raise ValueError(f"Ollama error ({resp.status_code}): {resp.text[:200]}")
-            content = resp.json()["message"]["content"]
-            return ProviderResponse(provider=self.name, content=self._validate_content(content), model=model)
+            return resp.json()["message"]["content"]
+
+    async def generate(self, prompt: str, image: Optional[Dict[str, Any]] = None, timeout: int = 90) -> ProviderResponse:
+        intent = self._classify_intent(prompt)
+
+        # Prefer Ollama Cloud (Turbo) when an API key is configured.
+        if self._cloud_key:
+            cloud_models = _OLLAMA_CLOUD_INTENT_MODELS.get(intent, [_OLLAMA_CLOUD_DEFAULT])
+            if _OLLAMA_CLOUD_DEFAULT not in cloud_models:
+                cloud_models = cloud_models + [_OLLAMA_CLOUD_DEFAULT]
+            for model in cloud_models:
+                try:
+                    logger.info(f"[ollama-cloud] intent={intent} → model={model}")
+                    content = await self._chat(self._cloud_base, model, prompt, timeout, auth=True)
+                    return ProviderResponse(provider=self.name, content=self._validate_content(content), model=f"{model} (cloud)")
+                except Exception as e:
+                    logger.warning(f"[ollama-cloud] {model} failed: {e}")
+            logger.info("[ollama-cloud] all cloud models failed — falling back to local")
+
+        # Local models (offline / no key, or cloud unreachable)
+        available = await self._get_available()
+        if not available:
+            raise ValueError("No Ollama models available")
+        model = self._best_model(available, intent)
+        logger.info(f"[ollama] intent={intent} → model={model}")
+        content = await self._chat(self._base, model, prompt, timeout, auth=False)
+        return ProviderResponse(provider=self.name, content=self._validate_content(content), model=model)
 
     async def check_health(self) -> Dict[str, Any]:
         self._available = []  # refresh on health check
         available = await self._get_available()
+        if self._cloud_key:
+            # Cloud is usable as long as we have a key; report local models too if present.
+            return {"ok": True, "models": available + [f"{_OLLAMA_CLOUD_DEFAULT} (cloud)"], "count": len(available) + 1}
         if available:
             return {"ok": True, "models": available, "count": len(available)}
         return {"ok": False, "reason": "Ollama not reachable or no models"}
