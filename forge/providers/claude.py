@@ -12,13 +12,7 @@ class ClaudeProvider(BaseProvider):
         self.url = "https://api.anthropic.com/v1/messages"
 
     async def generate(self, prompt: str, image: Optional[Dict[str, Any]] = None, timeout: int = 30) -> ProviderResponse:
-        # Use github_token as fallback if specifically needed, but usually Claude needs ANTHROPIC_API_KEY
-        # ai-router uses ANTHROPIC_API_KEY or CLAUDE_API_KEY
-        api_key = settings.github_token # Placeholder if shared via GH
-        # However, let's stick to conventional names or check shared env
-        
-        # Based on credentials/.env, it doesn't have ANTHROPIC_API_KEY set yet.
-        # But the user wants the implementation.
+        api_key = settings.anthropic_api_key
         
         headers = {
             "x-api-key": api_key if api_key else "",
@@ -43,6 +37,7 @@ class ClaudeProvider(BaseProvider):
             return ProviderResponse(provider=self.name, content=content, model=data.get("model"))
 
     async def check_health(self) -> Dict[str, Any]:
-        # Missing key in shared env usually means disabled
-        return {"ok": False, "reason": "No API key configured for Claude"}
+        if not settings.anthropic_api_key:
+            return {"ok": False, "reason": "No API key configured for Claude"}
+        return {"ok": True}
 

@@ -49,11 +49,12 @@ def ask(
 
 @app.command()
 def chat(
-    model: Optional[str] = typer.Option(None, "--model", "-m", help="Force a specific model")
+    model: Optional[str] = typer.Option(None, "--model", "-m", help="Force a specific model"),
+    preview_flag: bool = typer.Option(False, "--preview", "-p", help="Open browser preview (renders Mermaid + Markdown live)"),
 ):
     """Start an interactive chat session."""
     from forge.chat import ForgeChat
-    chat_app = ForgeChat(preferred_model=model)
+    chat_app = ForgeChat(preferred_model=model, preview_mode=preview_flag)
     asyncio.run(chat_app.start())
 
 @app.command()
@@ -86,6 +87,7 @@ def doctor():
     # 3. Key Detection
     console.print(f"\n[bold]API Keys:[/bold]")
     keys = {
+        "Antigravity": settings.antigravity_api_key,
         "Gemini": settings.gemini_api_key,
         "Groq": settings.groq_api_key,
         "OpenAI": settings.openai_api_key,
