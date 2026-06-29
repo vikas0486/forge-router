@@ -16,6 +16,7 @@ from forge.providers.copilot import CopilotProvider
 from forge.providers.openai import OpenAIProvider
 from forge.providers.codex import CodexProvider
 from forge.providers.ollama import OllamaProvider
+from forge.providers.perplexity import PerplexityProvider
 
 logger = logging.getLogger("forge.router")
 
@@ -63,7 +64,7 @@ def classify_intent(prompt: str) -> str:
 # Maps intent → ordered list of preferred provider names
 _INTENT_ROUTING: Dict[str, List[str]] = {
     "code":          ["codex", "claude", "hermes", "openai", "groq", "ollama"],
-    "reasoning":     ["hermes", "claude", "openai", "groq", "sakana", "antigravity", "ollama"],
+    "reasoning":     ["perplexity", "hermes", "claude", "openai", "groq", "sakana", "antigravity", "ollama"],
     "agentic":       ["claude", "openai", "hermes", "groq", "antigravity", "ollama"],
     "summarization": ["antigravity", "groq", "claude", "openai", "ollama"],
     "chat":          ["groq", "antigravity", "claude", "openai", "hermes", "ollama"],
@@ -110,6 +111,7 @@ class RouterEngine:
             OpenAIProvider(),
             CodexProvider(),
             OllamaProvider(),
+            PerplexityProvider(),
         ]
         self._by_name: Dict[str, BaseProvider] = {p.name: p for p in self._all_providers}
 
