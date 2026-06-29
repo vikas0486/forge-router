@@ -63,9 +63,12 @@ class Settings(BaseSettings):
     # Anthropic
     anthropic_api_key: Optional[str] = None
 
-    # Perplexity (Sonar)
+    # Perplexity (Sonar) — direct key, or run via OpenRouter below
     perplexity_api_key: Optional[str] = None
-    
+
+    # OpenRouter (backs Perplexity when no direct pplx key)
+    openrouter_api_key: Optional[str] = None
+
     # Ollama
     ollama_base_url: str = "http://localhost:11434"
     ollama_model: str = "llama3"
