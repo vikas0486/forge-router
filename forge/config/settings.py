@@ -62,7 +62,10 @@ class Settings(BaseSettings):
 
     # Anthropic
     anthropic_api_key: Optional[str] = None
-    
+
+    # OpenRouter (fallback for claude/openai/codex when native APIs are unavailable)
+    openrouter_api_key: Optional[str] = None
+
     # Ollama
     ollama_base_url: str = "http://localhost:11434"
     ollama_model: str = "llama3"

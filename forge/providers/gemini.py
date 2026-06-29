@@ -14,7 +14,8 @@ logger = logging.getLogger("forge.providers.gemini")
 class GeminiProvider(BaseProvider):
     def __init__(self):
         super().__init__(name="gemini", priority=1)
-        self.url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
+        self.model = "gemini-2.5-flash"
+        self.url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent"
 
     async def generate(self, prompt: str, image: Optional[Dict[str, Any]] = None, timeout: int = 30) -> ProviderResponse:
         key = settings.gemini_api_key or ""
@@ -37,7 +38,7 @@ class GeminiProvider(BaseProvider):
                 content = data["candidates"][0]["content"]["parts"][0]["text"]
             except (KeyError, IndexError):
                 raise ValueError(f"Unexpected Gemini response: {str(data)[:200]}")
-            return ProviderResponse(provider=self.name, content=self._validate_content(content), model="gemini-2.0-flash")
+            return ProviderResponse(provider=self.name, content=self._validate_content(content), model=self.model)
 
     async def check_health(self) -> Dict[str, Any]:
         key = settings.gemini_api_key or ""
