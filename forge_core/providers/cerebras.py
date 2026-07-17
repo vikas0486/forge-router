@@ -1,10 +1,10 @@
 import httpx
 import logging
 from typing import Optional, Dict, Any
-from forge.providers.base import BaseProvider, ProviderResponse
-from forge.config.settings import settings
+from forge_core.providers.base import BaseProvider, ProviderResponse
+from forge_core.config.settings import settings
 
-logger = logging.getLogger("forge.providers.cerebras")
+logger = logging.getLogger("forge_core.providers.cerebras")
 
 # Cerebras Cloud — wafer-scale chip inference.
 # Available models (verified via /v1/models): gpt-oss-120b, zai-glm-4.7

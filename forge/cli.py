@@ -5,9 +5,9 @@ import sys
 import platform
 import shutil
 from typing import Optional
-from forge.router.engine import router
+from forge_core.router.engine import router
 from forge.ui.console import console, display_welcome, display_response, display_status
-from forge.config.settings import settings, SHARED_ENV_PATH
+from forge_core.config.settings import settings, SHARED_ENV_PATH
 
 app = typer.Typer(
     help="🛠️ Forge: High-performance AI Router & Interactive CLI",

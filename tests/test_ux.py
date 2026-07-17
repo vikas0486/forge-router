@@ -64,3 +64,32 @@ def test_header_display():
     with patch("forge.ui.console.console.print") as mock_print:
         display_header("auto", "Gemini", 5)
         assert mock_print.called
+
+
+def test_auto_load_local_file(tmp_path):
+    """A real file path in the prompt is read locally and injected into context."""
+    chat = ForgeChat()
+    f = tmp_path / "notes.md"
+    f.write_text("forge auto-load bridge test content")
+    with patch("forge.chat.console.print"):
+        chat._auto_load_paths(f"Can you read my local file? {f}")
+    assert any(item["path"] == str(f) for item in chat._context_files)
+    assert "auto-load bridge test content" in chat._build_file_prefix()
+
+
+def test_auto_load_ignores_nonexistent_paths():
+    """Paths that don't exist on disk are never loaded."""
+    chat = ForgeChat()
+    with patch("forge.chat.console.print"):
+        chat._auto_load_paths("look at /no/such/path/here.py please")
+    assert chat._context_files == []
+
+
+def test_auto_load_skips_binary(tmp_path):
+    """Binary files are skipped, not injected as garbage context."""
+    chat = ForgeChat()
+    b = tmp_path / "blob.bin"
+    b.write_bytes(b"\x00\x01\x02binary")
+    with patch("forge.chat.console.print"):
+        chat._auto_load_paths(f"read {b}")
+    assert chat._context_files == []

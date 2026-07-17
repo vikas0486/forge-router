@@ -1,10 +1,10 @@
 import asyncio
 import logging
 from typing import Optional, Dict, Any
-from forge.providers.base import BaseProvider, ProviderResponse
-from forge.config.settings import settings
+from forge_core.providers.base import BaseProvider, ProviderResponse
+from forge_core.config.settings import settings
 
-logger = logging.getLogger("forge.providers.copilot")
+logger = logging.getLogger("forge_core.providers.copilot")
 
 class CopilotProvider(BaseProvider):
     def __init__(self):

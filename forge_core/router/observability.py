@@ -55,8 +55,10 @@ class QualityScore:
 
 
 class HermesObservability:
-    def __init__(self, log_path: str = "logs/observability.jsonl"):
-        self._log_path = Path(log_path)
+    # Absolute home under ~/.forge — a relative path scattered logs/ dirs into
+    # whatever CWD forge was launched from.
+    def __init__(self, log_path: Optional[str] = None):
+        self._log_path = Path(log_path) if log_path else Path.home() / ".forge" / "logs" / "observability.jsonl"
         self._log_path.parent.mkdir(parents=True, exist_ok=True)
         self._groq_url = "https://api.groq.com/openai/v1/chat/completions"
         self._ollama_url = "http://localhost:11434/api/chat"
@@ -87,7 +89,7 @@ class HermesObservability:
         return score
 
     async def _judge_hermes(self, judge_input: str, provider: str, intent: str, latency_ms: float) -> Optional[QualityScore]:
-        from forge.config.settings import settings
+        from forge_core.config.settings import settings
         key = settings.groq_api_key
         if not key:
             return None

@@ -3,7 +3,7 @@ import httpx
 from abc import ABC, abstractmethod
 from typing import Optional, Dict, Any, List
 
-logger = logging.getLogger("forge.providers")
+logger = logging.getLogger("forge_core.providers")
 
 class ProviderResponse:
     def __init__(self, provider: str, content: str, model: Optional[str] = None):

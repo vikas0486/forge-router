@@ -25,16 +25,19 @@ except ImportError:
     np = None     # type: ignore
     _FAISS_OK = False
 
-from forge.memory.embedder import embed
+from forge_core.memory.embedder import embed
 
-logger = logging.getLogger("forge.memory.kb")
+logger = logging.getLogger("forge_core.memory.kb")
 
 MEMORY_TRIGGER_PCT = 10       # consolidate every 10% of interactions
 MIN_INTERACTIONS_BEFORE_KB = 5
 TOP_K_RECALL = 4
 EMBED_DIM = 768               # nomic-embed-text output dimension
-DB_PATH = Path("memory/forge_kb.db")
-INDEX_PATH = Path("memory/forge_kb.faiss")
+# Fixed absolute home — a relative path here scattered memory/ dirs into
+# whatever CWD forge was launched from. All forge runtime data lives in ~/.forge.
+FORGE_DATA_DIR = Path.home() / ".forge"
+DB_PATH = FORGE_DATA_DIR / "kb" / "forge_kb.db"
+INDEX_PATH = FORGE_DATA_DIR / "kb" / "forge_kb.faiss"
 
 
 @dataclass
@@ -252,7 +255,7 @@ Facts:"""
         return facts
 
     async def _call_fast_llm(self, prompt: str) -> Optional[str]:
-        from forge.config.settings import settings
+        from forge_core.config.settings import settings
         # Prefer Groq (fast) for extraction
         if settings.groq_api_key:
             try:

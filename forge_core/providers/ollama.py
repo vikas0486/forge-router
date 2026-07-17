@@ -1,10 +1,10 @@
 import httpx
 import logging
 from typing import Optional, Dict, Any, List
-from forge.providers.base import BaseProvider, ProviderResponse
-from forge.config.settings import settings
+from forge_core.providers.base import BaseProvider, ProviderResponse
+from forge_core.config.settings import settings
 
-logger = logging.getLogger("forge.providers.ollama")
+logger = logging.getLogger("forge_core.providers.ollama")
 
 # Models confirmed to complete within 60s wall-clock — benchmarked on Intel i7 / 16 GB / 1.6 GB GPU.
 # Excluded after benchmarking:

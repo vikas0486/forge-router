@@ -3,7 +3,7 @@ import httpx
 import logging
 import numpy as np
 
-logger = logging.getLogger("forge.memory.embedder")
+logger = logging.getLogger("forge_core.memory.embedder")
 
 EMBED_MODEL = "nomic-embed-text:latest"
 OLLAMA_URL = "http://localhost:11434/api/embeddings"

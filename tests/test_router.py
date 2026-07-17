@@ -1,7 +1,7 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock
-from forge.router.engine import RouterEngine
-from forge.providers.base import ProviderResponse
+from forge_core.router.engine import RouterEngine
+from forge_core.providers.base import ProviderResponse
 
 @pytest.mark.asyncio
 async def test_router_fallback():

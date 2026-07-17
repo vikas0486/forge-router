@@ -3,22 +3,22 @@ import logging
 import re
 import time
 from typing import List, Optional, Dict, Any, Callable
-from forge.providers.base import BaseProvider, ProviderResponse
-from forge.router.observability import observability
-from forge.memory.knowledge_base import knowledge_base
-from forge.providers.antigravity import AntigravityProvider
-from forge.providers.cerebras import CerebrasProvider
-from forge.providers.groq import GroqProvider
-from forge.providers.hermes import HermesProvider
-from forge.providers.mistral import MistralProvider
-from forge.providers.claude import ClaudeProvider
-from forge.providers.openrouter import OpenRouterProvider
-from forge.providers.copilot import CopilotProvider
-from forge.providers.openai import OpenAIProvider
-from forge.providers.codex import CodexProvider
-from forge.providers.ollama import OllamaProvider
+from forge_core.providers.base import BaseProvider, ProviderResponse
+from forge_core.router.observability import observability
+from forge_core.memory.knowledge_base import knowledge_base
+from forge_core.providers.antigravity import AntigravityProvider
+from forge_core.providers.cerebras import CerebrasProvider
+from forge_core.providers.groq import GroqProvider
+from forge_core.providers.hermes import HermesProvider
+from forge_core.providers.mistral import MistralProvider
+from forge_core.providers.claude import ClaudeProvider
+from forge_core.providers.openrouter import OpenRouterProvider
+from forge_core.providers.copilot import CopilotProvider
+from forge_core.providers.openai import OpenAIProvider
+from forge_core.providers.codex import CodexProvider
+from forge_core.providers.ollama import OllamaProvider
 
-logger = logging.getLogger("forge.router")
+logger = logging.getLogger("forge_core.router")
 
 # Intent-tuned timeouts — chat is fast, reasoning/agentic get more runway
 _INTENT_TIMEOUT: Dict[str, int] = {

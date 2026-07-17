@@ -1,7 +1,7 @@
 import pytest
 
-from forge.config.settings import settings
-from forge.providers.codex import CodexProvider
+from forge_core.config.settings import settings
+from forge_core.providers.codex import CodexProvider
 
 
 class FakeResponse:
@@ -47,7 +47,7 @@ async def test_codex_prefers_dedicated_api_key(monkeypatch):
     monkeypatch.setattr(settings, "openai_api_key", "openai-token")
     monkeypatch.setattr(settings, "codex_api_url", "https://codex.example.test/responses")
     monkeypatch.setattr(settings, "codex_model", "codex-test-model")
-    monkeypatch.setattr("forge.providers.codex.httpx.AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr("forge_core.providers.codex.httpx.AsyncClient", FakeAsyncClient)
 
     response = await CodexProvider().generate("hello")
 

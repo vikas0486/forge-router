@@ -2,9 +2,9 @@ import asyncio
 import logging
 import shutil
 from typing import Optional, Dict, Any
-from forge.providers.base import BaseProvider, ProviderResponse
+from forge_core.providers.base import BaseProvider, ProviderResponse
 
-logger = logging.getLogger("forge.providers.antigravity")
+logger = logging.getLogger("forge_core.providers.antigravity")
 
 AGY_BIN = shutil.which("agy") or "/Users/vikash/.local/bin/agy"
 

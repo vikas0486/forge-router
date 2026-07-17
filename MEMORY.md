@@ -1,12 +1,16 @@
 # Forge Router — Project Notes
 
 ## Structure
-- `forge/`: main package — `cli.py` (Typer), `chat.py` (REPL), `router/`, `providers/` (11 active), `memory/` (FAISS+SQLite RAG), `ui/` (Rich, preview), `config/`
-- `tests/`: pytest suite (16 tests)
+- `forge_core/`: embeddable engine — `router/`, `providers/` (11 active), `memory/` (FAISS+SQLite RAG), `config/`. Zero CLI/UI imports (enforced by test). `from forge_core import router, RoutingContext`
+- `forge/`: CLI client — `cli.py` (Typer), `chat.py` (REPL + local-file bridge), `ui/` (Rich, preview)
+- `tests/`: pytest suite (21 tests)
 - `docs/ENTERPRISE-GATEWAY-EVALUATION.md`: gateway evolution architecture + roadmap
 
 ## Credentials
-Single source: `/Users/vikash/Documents/Projects/credentials/.env` (never committed; repo is PUBLIC)
+Single source: `/Users/vikash/Documents/Projects/credentials/.env` (never committed; repo is PUBLIC). antigravity/ollama need no keys; copilot uses CLI OAuth.
+
+## Runtime Data
+All under `~/.forge/`: `kb/` (FAISS+SQLite), `repo-memory/`, `logs/observability.jsonl`, preview files. Absolute paths — never written to repo or CWD.
 
 ## Active Providers (priority order)
 1. antigravity (`agy` CLI — Gemini Flash, no key)
@@ -25,5 +29,8 @@ Single source: `/Users/vikash/Documents/Projects/credentials/.env` (never commit
 - KB fact extraction: Groq llama-3.1-8b-instant primary, local llama3.1:8b fallback
 - Gemini and Sakana providers removed (antigravity replaces Gemini; Sakana has no free tier)
 
+## Key Features
+- Local-file bridge: any real file/dir path typed in a chat prompt is auto-read locally and injected into context — cloud LLMs (Groq etc.) "see" local files through forge (`_auto_load_paths` in chat.py)
+
 ## Status
-v0.2.0 tagged — last CLI-only release. Next: Phase 0 gateway extraction (`forge-core`).
+v0.3.0 — Phase 0 complete: `forge_core` extracted (gateway-ready engine). Next: Phase 1 FastAPI gateway (`/v1/messages` + `/v1/chat/completions`, virtual keys).

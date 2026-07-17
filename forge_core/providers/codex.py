@@ -1,10 +1,10 @@
 import httpx
 import logging
 from typing import Optional, Dict, Any
-from forge.providers.base import BaseProvider, ProviderResponse
-from forge.config.settings import settings
+from forge_core.providers.base import BaseProvider, ProviderResponse
+from forge_core.config.settings import settings
 
-logger = logging.getLogger("forge.providers.codex")
+logger = logging.getLogger("forge_core.providers.codex")
 
 class CodexProvider(BaseProvider):
     def __init__(self):

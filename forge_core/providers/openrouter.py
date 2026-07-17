@@ -1,10 +1,10 @@
 import httpx
 import logging
 from typing import Optional, Dict, Any
-from forge.providers.base import BaseProvider, ProviderResponse
-from forge.config.settings import settings
+from forge_core.providers.base import BaseProvider, ProviderResponse
+from forge_core.config.settings import settings
 
-logger = logging.getLogger("forge.providers.openrouter")
+logger = logging.getLogger("forge_core.providers.openrouter")
 
 # OpenRouter aggregates 200+ hosted models via a single OpenAI-compatible endpoint.
 # Key value: gives cloud access to large models (DeepSeek-R1 671B, Qwen-32B coder)

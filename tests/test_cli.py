@@ -1,7 +1,7 @@
 import pytest
 from typer.testing import CliRunner
 from forge.cli import app
-from forge.config.settings import settings
+from forge_core.config.settings import settings
 
 runner = CliRunner()
 

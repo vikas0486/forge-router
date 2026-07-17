@@ -15,16 +15,16 @@ from prompt_toolkit.formatted_text import HTML
 from prompt_toolkit.styles import Style
 from prompt_toolkit.filters import in_paste_mode
 
-from forge.router.engine import router, RoutingContext
+from forge_core.router.engine import router, RoutingContext
 from forge.ui.console import (
     console, display_welcome, display_response, ThinkingDisplay, Live,
     display_header, display_status
 )
 from forge.ui.preview_server import preview
-from forge.config.settings import settings
+from forge_core.config.settings import settings
 
 HISTORY_FILE = Path.home() / ".forge_chat_history"
-MEMORY_DIR = Path("/Users/vikash/Documents/Projects/memory")
+MEMORY_DIR = Path.home() / ".forge" / "repo-memory"   # /repo summaries for cross-session recall
 
 # Directories to skip when walking a repo
 _SKIP_DIRS = {
@@ -42,6 +42,12 @@ _SRC_EXTS = {
     ".env.example", ".gitignore", ".dockerignore",
 }
 _SRC_NAMES = {"Makefile", "Dockerfile", "Procfile", "README"}
+
+# Local-file bridge: detects absolute or ~ filesystem paths in a prompt
+# (at least two path segments, no spaces) so forge can read the file locally
+# and inject it — cloud LLMs like Groq can't touch the filesystem themselves.
+_PATH_CANDIDATE_RE = re.compile(r'(?<![\w:])(~?/[\w.@+~-]+(?:/[\w.@+~-]+)+/?)')
+_AUTO_LOAD_MAX_PATHS = 3
 
 # Extracts fenced code blocks: captures (lang, content)
 _CODE_BLOCK_RE = re.compile(r'```(\w*)\n(.*?)```', re.DOTALL)
@@ -243,6 +249,7 @@ class ForgeChat:
                 ("/context",           "Show loaded files  |  /context clear"),
                 ("/write <path>",      "Write last LLM response (or code block) to file"),
                 ("/run <command>",     "Run shell command, inject output as context"),
+                ("(automatic)",        "Any real file/dir path in your message is auto-loaded"),
                 ("/status  /models",   "Provider health"),
                 ("/provider",          "Last active provider"),
                 ("/stats   /kb",       "Session stats + memory KB"),
@@ -289,8 +296,8 @@ class ForgeChat:
             self._do_toggle_preview(show_status=True)
 
         elif cmd in ("/stats", "/kb"):
-            from forge.memory.knowledge_base import knowledge_base
-            from forge.router.observability import observability
+            from forge_core.memory.knowledge_base import knowledge_base
+            from forge_core.router.observability import observability
             kb = knowledge_base.stats()
             obs = observability.summary()
             console.print(f"\n[bold]Session[/bold]")
@@ -480,6 +487,9 @@ class ForgeChat:
                     await self.handle_command(user_input)
                     continue
 
+                # Local-file bridge: auto-load any real paths mentioned in the prompt
+                self._auto_load_paths(user_input)
+
                 img_data = self.attachments[0] if self.attachments else None
 
                 # Build a per-turn context that carries the persistent history
@@ -617,6 +627,42 @@ class ForgeChat:
         # Pick the largest block by character count
         lang, code = max(matches, key=lambda m: len(m[1]))
         return code.rstrip(), lang or "text"
+
+    def _auto_load_paths(self, text: str):
+        """Bridge local files to any LLM. Detects real filesystem paths in the
+        prompt, reads them locally, and injects them into session context —
+        so cloud providers (Groq, Claude, GPT...) can 'see' local files
+        without the user typing /file or /repo."""
+        loaded = {item["path"] for item in self._context_files}
+        for cand in _PATH_CANDIDATE_RE.findall(text)[:_AUTO_LOAD_MAX_PATHS]:
+            path = os.path.expanduser(cand.rstrip(".,;:!?'\")"))
+            if path in loaded or not os.path.exists(path):
+                continue
+            try:
+                if os.path.isdir(path):
+                    content, file_count, total_chars = self._read_repo(path)
+                    self._context_files.append({"type": "repo", "path": path, "content": content, "lang": ""})
+                    console.print(
+                        f"[bold cyan]◈ Auto-loaded repo[/bold cyan] {path} — {file_count} files, {total_chars:,} chars"
+                    )
+                    self._save_repo_memory(path, content, file_count)
+                else:
+                    raw = Path(path).read_bytes()
+                    if b"\x00" in raw[:1024]:
+                        console.print(f"[dim]◈ Skipped binary file: {path} (use /image for pictures)[/dim]")
+                        continue
+                    content = raw.decode("utf-8", errors="replace")
+                    if len(content) > 120_000:
+                        content = content[:120_000] + "\n\n... [truncated at 120KB]"
+                    lang = Path(path).suffix.lstrip(".") or "text"
+                    self._context_files.append({"type": "file", "path": path, "content": content, "lang": lang})
+                    console.print(
+                        f"[bold cyan]◈ Auto-loaded[/bold cyan] {path} — {len(content):,} chars"
+                    )
+                console.print("[dim]  forge read it locally — the LLM now sees its contents in every call.[/dim]")
+                loaded.add(path)
+            except Exception as e:
+                console.print(f"[dim]◈ Auto-load failed for {path}: {e}[/dim]")
 
     def _save_repo_memory(self, repo_path: str, content: str, file_count: int):
         """Persist a repo summary to the shared memory directory for cross-session recall."""

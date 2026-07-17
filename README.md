@@ -90,6 +90,18 @@ sequenceDiagram
 
 ---
 
+## Local-File Bridge
+
+Cloud LLMs can't touch your filesystem — forge bridges that. Mention any real file or directory path in a prompt and forge reads it locally, injects the contents into the provider call, and the LLM answers as if it read the file itself:
+
+```
+Forge ❯ Can you review /Users/vikash/Documents/Projects/saturs/app.py?
+◈ Auto-loaded /Users/vikash/Documents/Projects/saturs/app.py — 4,213 chars
+  forge read it locally — the LLM now sees its contents in every call.
+```
+
+Works with files and whole directories (loaded as a repo tree), skips binaries, caps at 120KB/file, and stays loaded for the whole session across provider failovers. Explicit `/file` and `/repo` commands still work for fine control.
+
 ## Agentic File Operations
 
 The core workflow: load a repo, ask any LLM to write/fix code, save it, run it, iterate — without leaving forge.
@@ -166,20 +178,37 @@ pipx install .
 uv sync && uv pip install -e .
 ```
 
-Credentials load from `/Users/vikash/Documents/Projects/credentials/.env` (or a local `.env`):
+### Credentials — single source of truth
 
-```env
-GROQ_API_KEY=...        # groq + hermes + quality judge
-CEREBRAS_API_KEY=...    # cloud.cerebras.ai (free tier)
-MISTRAL_API_KEY=...     # console.mistral.ai (free tier)
-ANTHROPIC_API_KEY=...   # claude
-OPENAI_API_KEY=...      # openai + codex fallback
-CODEX_API_KEY=...       # codex (preferred)
-OPENROUTER_API_KEY=...  # openrouter.ai
-GITHUB_TOKEN=...        # copilot CLI
+All API keys load from **`/Users/vikash/Documents/Projects/credentials/.env`** (falling back to a local `.env`). Parsed by `forge_core/config/settings.py` — keys are read once at startup and never logged or committed. How each of the 11 providers authenticates:
+
+| Provider | Credential | Source |
+|---|---|---|
+| `groq`, `hermes` + quality judge | `GROQ_API_KEY` (or `GROQ_API_KEY_2`) | credentials/.env |
+| `cerebras` | `CEREBRAS_API_KEY` | credentials/.env (cloud.cerebras.ai free tier) |
+| `mistral` | `MISTRAL_API_KEY` | credentials/.env (console.mistral.ai free tier) |
+| `claude` | `ANTHROPIC_API_KEY` (or `CLAUDE_API_KEY`) | credentials/.env |
+| `openai` | `OPENAI_API_KEY` | credentials/.env |
+| `codex` | `CODEX_API_KEY` (falls back to `OPENAI_API_KEY`) | credentials/.env |
+| `openrouter` | `OPENROUTER_API_KEY` | credentials/.env |
+| `copilot` | GitHub Copilot CLI login (`GITHUB_TOKEN`) | copilot CLI OAuth + credentials/.env |
+| `antigravity` | none — `agy` CLI uses local OAuth | no key needed |
+| `ollama` | none — local inference | no key needed |
+
+Verify everything with `forge doctor`.
+
+### Runtime data — single home at `~/.forge/`
+
+```
+~/.forge/
+├── kb/               # FAISS + SQLite knowledge base (RAG memory)
+├── repo-memory/      # /repo session summaries for cross-session recall
+├── logs/             # observability.jsonl — quality judge scores
+├── results.md        # last preview content
+└── preview_state.json
 ```
 
-Antigravity (`agy` CLI) and Ollama need no API keys.
+Nothing is written into the repo or your CWD at runtime.
 
 ---
 
@@ -215,10 +244,10 @@ forge doctor          # diagnose keys + tools + health
 
 ## Project Structure
 
+Since v0.3.0 the engine lives in **`forge_core`** — an embeddable package with zero CLI/UI imports (enforced by test), so the CLI today and the HTTP gateway in Phase 1 drive the identical engine:
+
 ```
-forge/
-├── cli.py                  # Typer entry point
-├── chat.py                 # ForgeChat REPL — context, preview, /write /run
+forge_core/                 # ── the embeddable engine (gateway-ready) ──
 ├── router/
 │   ├── engine.py           # RouterEngine, RoutingContext, intent chains
 │   └── observability.py    # Async LLM quality judge
@@ -226,12 +255,17 @@ forge/
 ├── memory/
 │   ├── knowledge_base.py   # FAISS + SQLite KB, auto-consolidation
 │   └── embedder.py         # Ollama nomic-embed-text wrapper
-├── ui/
-│   ├── console.py          # Rich terminal output
-│   ├── preview_server.py   # HTTP server + ForgePreview singleton
-│   └── preview_window.py   # pywebview WKWebView subprocess
 └── config/
     └── settings.py         # pydantic-settings, credential loading
+
+forge/                      # ── the CLI client ──
+├── cli.py                  # Typer entry point
+├── chat.py                 # ForgeChat REPL — context, preview, /write /run,
+│                           #   local-file bridge (auto-loads paths in prompts)
+└── ui/
+    ├── console.py          # Rich terminal output
+    ├── preview_server.py   # HTTP server + ForgePreview singleton
+    └── preview_window.py   # pywebview WKWebView subprocess
 ```
 
 ---
