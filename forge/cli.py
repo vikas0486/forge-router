@@ -68,7 +68,12 @@ def status():
     asyncio.run(_status())
 
 @app.command()
-def doctor():
+def doctor(
+    live: bool = typer.Option(
+        False, "--live",
+        help="Send a real 1-word generation to every provider — surfaces quota, credit, and auth failures that key checks miss",
+    ),
+):
     """Diagnose configuration and environment issues."""
     console.print("\n[bold info]⚒️ Forge Diagnosis Report[/bold info]\n")
     
@@ -109,16 +114,38 @@ def doctor():
         console.print(f"  {cmd.ljust(15)}: {status}")
 
     # 5. Provider Health
-    console.print(f"\n[bold]Provider Health:[/bold]")
-    async def run_health_checks():
-        results = await router.get_status()
-        for name, stat in results.items():
-            if stat["ok"]:
-                console.print(f"  [success]✓[/success] {name.ljust(10)}: READY")
-            else:
-                console.print(f"  [error]✗[/error] {name.ljust(10)}: FAILED ({stat.get('reason')})")
+    if live:
+        console.print(f"\n[bold]Provider Health — LIVE PROBE[/bold] [dim](real generation per provider, ~40s max)[/dim]")
+        async def run_deep_probe():
+            with console.status("[bold cyan]Probing all providers concurrently..."):
+                results = await router.deep_probe()
+            from rich.table import Table
+            table = Table(title="Live Provider Probe")
+            table.add_column("Provider", style="yellow")
+            table.add_column("Status", justify="center")
+            table.add_column("Model / Reason", style="dim", max_width=90)
+            table.add_column("Latency", justify="right")
+            working = 0
+            for name, r in results.items():
+                if r["ok"]:
+                    working += 1
+                    table.add_row(name, "[green]✓ WORKS[/green]", r["model"], f"{r['latency_s']}s")
+                else:
+                    table.add_row(name, f"[red]✗ {r['stage'].upper()}[/red]", r["reason"], "—")
+            console.print(table)
+            console.print(f"\n[bold]{working}/{len(results)} providers actually working[/bold]")
+        asyncio.run(run_deep_probe())
+    else:
+        console.print(f"\n[bold]Provider Health:[/bold] [dim](key/config check only — use --live for real access verification)[/dim]")
+        async def run_health_checks():
+            results = await router.get_status()
+            for name, stat in results.items():
+                if stat["ok"]:
+                    console.print(f"  [success]✓[/success] {name.ljust(10)}: READY")
+                else:
+                    console.print(f"  [error]✗[/error] {name.ljust(10)}: FAILED ({stat.get('reason')})")
+        asyncio.run(run_health_checks())
 
-    asyncio.run(run_health_checks())
     console.print("\n[info]Diagnosis complete.[/info]\n")
 
 @app.command()

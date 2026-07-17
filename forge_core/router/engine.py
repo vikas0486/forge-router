@@ -347,6 +347,35 @@ class RouterEngine:
             results[p.name] = await p.check_health()
         return results
 
+    async def deep_probe(self) -> Dict[str, Dict[str, Any]]:
+        """Live-generation probe of every provider, run concurrently.
+
+        check_health() only proves a key EXISTS; this proves it WORKS — real
+        auth, quota, and credit failures surface here (expired copilot login,
+        wrong key values, exhausted free tiers, empty credit balances)."""
+        async def _probe(p: BaseProvider) -> Dict[str, Any]:
+            t0 = time.time()
+            try:
+                health = await p.check_health()
+                if not health.get("ok"):
+                    return {"ok": False, "stage": "config", "reason": health.get("reason", "unhealthy")}
+                resp = await asyncio.wait_for(
+                    p.generate("Reply with one word: OK", timeout=25),
+                    timeout=40,
+                )
+                return {
+                    "ok": True,
+                    "model": resp.model or p.name,
+                    "latency_s": round(time.time() - t0, 1),
+                }
+            except asyncio.TimeoutError:
+                return {"ok": False, "stage": "timeout", "reason": "no response within 40s"}
+            except Exception as e:
+                return {"ok": False, "stage": "runtime", "reason": str(e)[:180]}
+
+        probes = await asyncio.gather(*(_probe(p) for p in self._all_providers))
+        return {p.name: r for p, r in zip(self._all_providers, probes)}
+
     def new_context(self, prompt: str) -> RoutingContext:
         return RoutingContext(prompt)
 

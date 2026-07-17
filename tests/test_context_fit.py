@@ -58,3 +58,23 @@ async def test_router_fits_prompt_per_provider():
     assert seen["small"] <= 3_000
     assert seen["big"] > seen["small"]
     assert seen["big"] >= len(ctx.system_prefix)
+
+
+@pytest.mark.asyncio
+async def test_deep_probe_reports_real_failures():
+    """deep_probe distinguishes config failures from runtime failures."""
+    router = RouterEngine()
+    ok = MagicMock(); ok.name = "ok"; ok.priority = 1
+    ok.check_health = AsyncMock(return_value={"ok": True})
+    ok.generate = AsyncMock(return_value=ProviderResponse("ok", "OK", model="m1"))
+    nokey = MagicMock(); nokey.name = "nokey"; nokey.priority = 2
+    nokey.check_health = AsyncMock(return_value={"ok": False, "reason": "Missing KEY"})
+    broke = MagicMock(); broke.name = "broke"; broke.priority = 3
+    broke.check_health = AsyncMock(return_value={"ok": True})
+    broke.generate = AsyncMock(side_effect=ValueError("401 bad key"))
+    router.providers = [ok, nokey, broke]
+
+    r = await router.deep_probe()
+    assert r["ok"]["ok"] and r["ok"]["model"] == "m1"
+    assert not r["nokey"]["ok"] and r["nokey"]["stage"] == "config"
+    assert not r["broke"]["ok"] and r["broke"]["stage"] == "runtime" and "401" in r["broke"]["reason"]

@@ -10,8 +10,13 @@ logger = logging.getLogger(__name__)
 SHARED_ENV_PATH = Path("/Users/vikash/Documents/Projects/credentials/.env")
 PROJECT_ENV_PATH = Path(".env")
 
-def _load_clean_env(path: Path) -> None:
-    """Parse .env file skipping shell commands; inject valid KEY=VALUE into os.environ."""
+def _load_clean_env(path: Path, override: bool = False) -> None:
+    """Parse .env file skipping shell commands; inject valid KEY=VALUE into os.environ.
+
+    override=True makes the file win over values already in the environment —
+    the shared credentials file is the source of truth, and .zshrc exports
+    stale copies of it into every shell at startup, which would otherwise
+    shadow freshly edited keys until the terminal is reopened."""
     if not path.exists():
         return
     pattern = re.compile(r'^([A-Z][A-Z0-9_]*)=(.*)$')
@@ -21,11 +26,11 @@ def _load_clean_env(path: Path) -> None:
             m = pattern.match(line)
             if m:
                 key, val = m.group(1), m.group(2).strip('"').strip("'")
-                if val and not os.environ.get(key):
+                if val and (override or not os.environ.get(key)):
                     os.environ[key] = val
 
-_load_clean_env(SHARED_ENV_PATH)
-_load_clean_env(PROJECT_ENV_PATH)
+_load_clean_env(SHARED_ENV_PATH, override=True)   # credentials/.env is authoritative
+_load_clean_env(PROJECT_ENV_PATH)                 # local .env only fills gaps
 
 # Alias: GROQ_API_KEY_2 → GROQ_API_KEY if not already set
 if not os.environ.get("GROQ_API_KEY"):
@@ -60,7 +65,7 @@ class Settings(BaseSettings):
     openai_api_key: Optional[str] = None
     codex_api_key: Optional[str] = None
     codex_api_url: str = "https://api.openai.com/v1/responses"
-    codex_model: str = "codex-mini-latest"
+    codex_model: str = "gpt-5.1-codex-mini"   # codex-mini-latest was retired; key verified to have gpt-5.x catalog
 
     # Anthropic
     anthropic_api_key: Optional[str] = None
