@@ -67,8 +67,10 @@ class Settings(BaseSettings):
     codex_api_url: str = "https://api.openai.com/v1/responses"
     codex_model: str = "gpt-5.1-codex-mini"   # codex-mini-latest was retired; key verified to have gpt-5.x catalog
 
-    # Anthropic
+    # Anthropic — API key (prepaid console credits) is optional fallback;
+    # primary claude backend is the Claude Code CLI (paid subscription)
     anthropic_api_key: Optional[str] = None
+    claude_code_oauth_token: Optional[str] = None
 
     # Ollama
     ollama_base_url: str = "http://localhost:11434"

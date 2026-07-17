@@ -108,7 +108,7 @@ Providers have wildly different input limits — Groq's free tier allows 12K tok
 
 | Provider | Budget (chars ≈ tokens/4) | Constraint |
 |---|---|---|
-| claude | 400,000 | 200K-token window |
+| claude | 200,000 | subscription CLI, arg-length bound |
 | openai / codex | 300,000 | 128K+ token windows |
 | antigravity | 200,000 | Gemini Flash 1M ctx, CLI arg-length bound |
 | mistral / openrouter | 100,000 | 32K-token windows |
@@ -204,7 +204,7 @@ All API keys load from **`/Users/vikash/Documents/Projects/credentials/.env`** (
 | `groq`, `hermes` + quality judge | `GROQ_API_KEY` (or `GROQ_API_KEY_2`) | credentials/.env |
 | `cerebras` | `CEREBRAS_API_KEY` | credentials/.env (cloud.cerebras.ai free tier) |
 | `mistral` | `MISTRAL_API_KEY` | credentials/.env (console.mistral.ai free tier) |
-| `claude` | `ANTHROPIC_API_KEY` (or `CLAUDE_API_KEY`) | credentials/.env |
+| `claude` | **Claude Code CLI (paid subscription)** — `CLAUDE_CODE_OAUTH_TOKEN` optional; `ANTHROPIC_API_KEY` only as prepaid-API fallback | claude CLI OAuth |
 | `openai` | `OPENAI_API_KEY` | credentials/.env |
 | `codex` | `CODEX_API_KEY` (falls back to `OPENAI_API_KEY`) | credentials/.env |
 | `openrouter` | `OPENROUTER_API_KEY` | credentials/.env |
