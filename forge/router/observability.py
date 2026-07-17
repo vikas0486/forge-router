@@ -113,7 +113,7 @@ class HermesObservability:
 
     async def _judge_local(self, judge_input: str, provider: str, intent: str, latency_ms: float) -> Optional[QualityScore]:
         # Try local models in order — prefer qwen3 (fast) then deepseek-r1
-        for model in ("qwen3:latest", "deepseek-r1:8b"):
+        for model in ("llama3.1:8b", "nous-hermes2:latest"):
             try:
                 async with httpx.AsyncClient(timeout=20) as client:
                     resp = await client.post(

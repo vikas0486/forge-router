@@ -21,7 +21,7 @@ def _load_clean_env(path: Path) -> None:
             m = pattern.match(line)
             if m:
                 key, val = m.group(1), m.group(2).strip('"').strip("'")
-                if val and key not in os.environ:
+                if val and not os.environ.get(key):
                     os.environ[key] = val
 
 _load_clean_env(SHARED_ENV_PATH)
@@ -41,32 +41,34 @@ if not os.environ.get("ANTHROPIC_API_KEY") and os.environ.get("CLAUDE_API_KEY"):
 logger.info("Env loaded from: %s", SHARED_ENV_PATH if SHARED_ENV_PATH.exists() else PROJECT_ENV_PATH)
 
 class Settings(BaseSettings):
-    # Gemini
-    gemini_api_key: Optional[str] = None
-    
-    # Antigravity
-    antigravity_api_key: Optional[str] = None
-    
     # Groq
     groq_api_key: Optional[str] = None
 
-    # Sakana.ai
-    sakana_api_key: Optional[str] = None
+    # Cerebras — wafer-scale chip, rivals Groq in speed, free ~100K tokens/day
+    cerebras_api_key: Optional[str] = None
 
-    # GitHub (Claude Code, Codex, Copilot)
+    # Mistral AI — mistral-small-latest is free (no quota cap)
+    mistral_api_key: Optional[str] = None
+
+    # OpenRouter — aggregates 200+ models via single key
+    openrouter_api_key: Optional[str] = None
+
+    # GitHub (Copilot CLI auth)
     github_token: Optional[str] = None
-    forge_read_token: Optional[str] = None
-    
-    # OpenAI
+
+    # OpenAI / Codex
     openai_api_key: Optional[str] = None
+    codex_api_key: Optional[str] = None
+    codex_api_url: str = "https://api.openai.com/v1/responses"
+    codex_model: str = "codex-mini-latest"
 
     # Anthropic
     anthropic_api_key: Optional[str] = None
-    
+
     # Ollama
     ollama_base_url: str = "http://localhost:11434"
     ollama_model: str = "llama3"
-    
+
     # App Settings
     debug: bool = False
     timeout: int = 30
@@ -76,4 +78,3 @@ class Settings(BaseSettings):
     )
 
 settings = Settings()
-

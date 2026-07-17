@@ -39,11 +39,13 @@ class HermesProvider(BaseProvider):
         return None
 
     async def generate(self, prompt: str, image: Optional[Dict[str, Any]] = None, timeout: int = 30) -> ProviderResponse:
-        # Prefer local Hermes if available
+        # Prefer Groq API (fast, ~2-3s) — only fall back to local if Groq key is absent
+        if settings.groq_api_key:
+            return await self._generate_groq(prompt, timeout)
         local_model = await self._available_ollama_hermes()
         if local_model:
             return await self._generate_ollama(prompt, local_model, timeout)
-        return await self._generate_groq(prompt, timeout)
+        raise ValueError("No GROQ_API_KEY and no local Hermes model available")
 
     async def _generate_groq(self, prompt: str, timeout: int) -> ProviderResponse:
         if not settings.groq_api_key:
@@ -88,8 +90,8 @@ class HermesProvider(BaseProvider):
         return ProviderResponse(provider=self.name, content=self._validate_content(content), model=f"hermes@{model}")
 
     async def check_health(self) -> Dict[str, Any]:
-        if await self._available_ollama_hermes():
-            return {"ok": True, "backend": "ollama-hermes"}
         if settings.groq_api_key:
             return {"ok": True, "backend": f"groq:{self._groq_model}"}
+        if await self._available_ollama_hermes():
+            return {"ok": True, "backend": "ollama-hermes (no Groq key)"}
         return {"ok": False, "reason": "No GROQ_API_KEY and no local Hermes model"}

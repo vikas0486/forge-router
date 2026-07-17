@@ -5,3 +5,8 @@ __pycache__/
 .env
 .env.*
 .DS_Store
+
+# Personal RAG knowledge base + runtime logs — never commit
+memory/*.db
+memory/*.faiss
+logs/

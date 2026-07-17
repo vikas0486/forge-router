@@ -4,8 +4,11 @@ import os
 import re
 import base64
 import mimetypes
+import datetime
+import subprocess
+import shlex
 from pathlib import Path
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Tuple
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.history import FileHistory
@@ -23,6 +26,29 @@ from forge.ui.preview_server import preview
 from forge.config.settings import settings
 
 HISTORY_FILE = Path.home() / ".forge_chat_history"
+MEMORY_DIR = Path("/Users/vikash/Documents/Projects/memory")
+
+# Directories to skip when walking a repo
+_SKIP_DIRS = {
+    ".git", "node_modules", "__pycache__", ".venv", "venv", "env",
+    ".mypy_cache", ".pytest_cache", "dist", "build", ".next", ".nuxt",
+    ".turbo", "coverage", ".tox", ".eggs", "*.egg-info",
+}
+
+# Source file extensions to include when reading a repo
+_SRC_EXTS = {
+    ".py", ".ts", ".tsx", ".js", ".jsx", ".go", ".rs", ".java",
+    ".cpp", ".c", ".h", ".cs", ".rb", ".php", ".swift", ".kt",
+    ".scala", ".r", ".sql", ".sh", ".bash", ".zsh",
+    ".yaml", ".yml", ".toml", ".json", ".md", ".txt",
+    ".env.example", ".gitignore", ".dockerignore",
+}
+_SRC_NAMES = {"Makefile", "Dockerfile", "Procfile", "README"}
+
+# Extracts fenced code blocks: captures (lang, content)
+_CODE_BLOCK_RE = re.compile(r'```(\w*)\n(.*?)```', re.DOTALL)
+# Max bytes of command output to inject back as context
+_RUN_MAX_OUTPUT = 12_000
 
 # ── Visual content detector ──────────────────────────────────────────────────
 # Matches: mermaid/plantuml/graphviz code blocks, markdown images,
@@ -66,6 +92,9 @@ class ForgeChat:
 
         # Persistent conversation history — survives LLM fallbacks and model switches
         self._session_history: List[Dict[str, str]] = []
+
+        # File/repo context — prepended to EVERY provider call so LLM switches are transparent
+        self._context_files: List[Dict[str, Any]] = []
 
         if preview_mode:
             self._preview_explicit = True
@@ -201,30 +230,36 @@ class ForgeChat:
             display_welcome()
             self.msg_count = 0
             self.attachments = []
-            self._session_history = []  # clear conversation context too
-            console.print("[success]Chat cleared. Context and history reset.[/success]")
+            self._session_history = []
+            self._context_files = []
+            console.print("[success]Chat cleared. Context, files, and history reset.[/success]")
 
         elif cmd == "/help":
             console.print("\n[bold]Commands:[/bold]")
             rows = [
-                ("/help",             "Show this help"),
-                ("/history",          "Show recent prompts"),
-                ("/clear",            "Clear screen + reset context"),
-                ("/status  /models",  "Provider health"),
-                ("/provider",         "Last active provider"),
-                ("/stats   /kb",      "Session stats + memory KB"),
-                ("/model <name|auto>","Force or release model"),
-                ("/image <path>",     "Attach image for Vision"),
-                ("/p  /preview",      "Toggle WKWebView preview window"),
-                ("Ctrl+P",            "Toggle preview (instant, no typing)"),
-                ("/exit",             "Exit"),
+                ("/help",              "Show this help"),
+                ("/history",           "Show recent prompts"),
+                ("/clear",             "Clear screen, files, and history"),
+                ("/file <path>",       "Load a file into session context"),
+                ("/repo <path>",       "Load entire repo into session context"),
+                ("/context",           "Show loaded files  |  /context clear"),
+                ("/write <path>",      "Write last LLM response (or code block) to file"),
+                ("/run <command>",     "Run shell command, inject output as context"),
+                ("/status  /models",   "Provider health"),
+                ("/provider",          "Last active provider"),
+                ("/stats   /kb",       "Session stats + memory KB"),
+                ("/model <name|auto>", "Force or release model"),
+                ("/image <path>",      "Attach image for Vision"),
+                ("/p  /preview",       "Toggle WKWebView preview window"),
+                ("Ctrl+P",             "Toggle preview (instant, no typing)"),
+                ("/exit",              "Exit"),
             ]
             for cmd_str, desc in rows:
-                console.print(f"  [cyan]{cmd_str:<22}[/cyan] {desc}")
+                console.print(f"  [cyan]{cmd_str:<24}[/cyan] {desc}")
             console.print("")
 
         elif cmd == "/history":
-            console.print("\n[bold]Recent prompts:[/bold]")
+            console.print("\n[bold]Chat History:[/bold]")
             for i, entry in enumerate(list(self.session.history.get_strings())[-10:], 1):
                 console.print(f"  [dim]{i}.[/dim] {entry.strip()[:120]}")
             console.print("")
@@ -235,9 +270,13 @@ class ForgeChat:
                 if val == "auto":
                     self.preferred_model = None
                     console.print("[success]Routing: auto[/success]")
-                else:
+                elif val in router._by_name:
                     self.preferred_model = val
                     console.print(f"[success]Model locked: {val}[/success]")
+                else:
+                    valid = ", ".join(sorted(router._by_name.keys()))
+                    console.print(f"[error]Unknown provider: '{val}'[/error]")
+                    console.print(f"[dim]Valid providers: {valid}[/dim]")
             else:
                 console.print(f"[info]Model: {self.preferred_model or 'auto-routing'}[/info]")
 
@@ -257,8 +296,10 @@ class ForgeChat:
             kb = knowledge_base.stats()
             obs = observability.summary()
             console.print(f"\n[bold]Session[/bold]")
+            ctx_size = sum(len(f["content"]) for f in self._context_files)
             console.print(f"  Messages        : {self.msg_count}")
             console.print(f"  Context turns   : {len(self._session_history)}")
+            console.print(f"  Loaded files    : {len(self._context_files)} ({ctx_size:,} chars)")
             console.print(f"  Last provider   : {self.last_provider} ({self.last_model})")
             console.print(f"  Preview         : {'ON' if preview.active and preview.window_alive else 'OFF'}")
             console.print(f"\n[bold]Memory KB[/bold]")
@@ -285,6 +326,125 @@ class ForgeChat:
                     console.print(f"[error]Not found: {path}[/error]")
             else:
                 console.print("[warning]Usage: /image <path>[/warning]")
+
+        elif cmd == "/file":
+            if len(parts) > 1:
+                path = os.path.expanduser(parts[1].strip("'\""))
+                if os.path.isfile(path):
+                    try:
+                        content = Path(path).read_text(errors="replace")
+                        if len(content) > 120_000:
+                            content = content[:120_000] + "\n\n... [truncated at 120KB]"
+                        lang = Path(path).suffix.lstrip(".") or "text"
+                        self._context_files.append({"type": "file", "path": path, "content": content, "lang": lang})
+                        lines = len(content.splitlines())
+                        console.print(f"[success]Loaded[/success] {path} — {lines} lines, {len(content):,} chars")
+                        console.print(f"[dim]This file is now injected into every LLM call this session.[/dim]")
+                    except Exception as e:
+                        console.print(f"[error]Failed to read: {e}[/error]")
+                else:
+                    console.print(f"[error]Not found: {path}[/error]")
+            else:
+                console.print("[warning]Usage: /file <path>[/warning]")
+
+        elif cmd == "/repo":
+            if len(parts) > 1:
+                path = os.path.expanduser(parts[1].strip("'\""))
+                if os.path.isdir(path):
+                    console.print(f"[dim]Reading repo: {path} ...[/dim]")
+                    try:
+                        content, file_count, total_chars = self._read_repo(path)
+                        self._context_files.append({"type": "repo", "path": path, "content": content, "lang": ""})
+                        console.print(f"[success]Loaded repo[/success] {path} — {file_count} files, {total_chars:,} chars")
+                        console.print(f"[dim]Entire repo is now injected into every LLM call this session.[/dim]")
+                        self._save_repo_memory(path, content, file_count)
+                    except Exception as e:
+                        console.print(f"[error]Failed: {e}[/error]")
+                else:
+                    console.print(f"[error]Not a directory: {path}[/error]")
+            else:
+                console.print("[warning]Usage: /repo <path>[/warning]")
+
+        elif cmd == "/context":
+            if len(parts) > 1 and parts[1] == "clear":
+                self._context_files = []
+                console.print("[success]Context files cleared.[/success]")
+            else:
+                if not self._context_files:
+                    console.print("[dim]No files loaded. Use /file <path> or /repo <path>[/dim]")
+                else:
+                    console.print(f"\n[bold]Loaded context ({len(self._context_files)} items):[/bold]")
+                    for i, item in enumerate(self._context_files, 1):
+                        sz = len(item["content"])
+                        console.print(f"  {i}. [{item['type']}] {item['path']}  ({sz:,} chars)")
+                    total = sum(len(f["content"]) for f in self._context_files)
+                    console.print(f"  Total: {total:,} chars\n")
+
+        elif cmd == "/write":
+            if len(parts) < 2:
+                console.print("[warning]Usage: /write <path>  — saves last LLM response (or largest code block) to file[/warning]")
+            elif not self._last_response_content:
+                console.print("[error]No response yet — ask something first[/error]")
+            else:
+                path = os.path.expanduser(parts[1].strip("'\""))
+                code, lang = self._extract_best_code_block(self._last_response_content)
+                content_to_write = code if code else self._last_response_content
+                try:
+                    dest = Path(path)
+                    dest.parent.mkdir(parents=True, exist_ok=True)
+                    dest.write_text(content_to_write)
+                    lines = len(content_to_write.splitlines())
+                    label = f"code block ({lang})" if code else "raw response"
+                    console.print(f"[success]Written[/success] {path} — {lines} lines [{label}]")
+                    # Auto-load the written file into context so the LLM sees its own output
+                    self._context_files.append({"type": "file", "path": path, "content": content_to_write, "lang": lang or Path(path).suffix.lstrip(".")})
+                    console.print(f"[dim]File also added to session context.[/dim]")
+                except Exception as e:
+                    console.print(f"[error]Write failed: {e}[/error]")
+
+        elif cmd == "/run":
+            if len(parts) < 2:
+                console.print("[warning]Usage: /run <shell command>  — runs command, injects output as context[/warning]")
+            else:
+                raw_cmd = text[len("/run"):].strip()
+                console.print(f"[dim]$ {raw_cmd}[/dim]")
+                try:
+                    result = subprocess.run(
+                        raw_cmd,
+                        shell=True,
+                        capture_output=True,
+                        text=True,
+                        timeout=120,
+                        cwd=os.getcwd(),
+                    )
+                    stdout = result.stdout or ""
+                    stderr = result.stderr or ""
+                    combined = stdout
+                    if stderr:
+                        combined += ("\n--- stderr ---\n" + stderr) if stdout else stderr
+                    if len(combined) > _RUN_MAX_OUTPUT:
+                        combined = combined[:_RUN_MAX_OUTPUT] + f"\n... [output truncated at {_RUN_MAX_OUTPUT} chars]"
+                    rc = result.returncode
+
+                    # Print to terminal
+                    if combined.strip():
+                        console.print(combined)
+                    status_label = "[success]✓[/success]" if rc == 0 else f"[error]✗ exit {rc}[/error]"
+                    console.print(f"{status_label} [dim]{raw_cmd}[/dim]")
+
+                    # Inject into conversation history so the LLM knows what happened
+                    run_record = (
+                        f"[Command executed]\n$ {raw_cmd}\n"
+                        f"Exit code: {rc}\n"
+                        f"Output:\n```\n{combined.strip()}\n```"
+                    )
+                    self._session_history.append({"role": "user", "content": run_record})
+                    self._session_history = self._session_history[-40:]
+
+                except subprocess.TimeoutExpired:
+                    console.print("[error]Command timed out after 120s[/error]")
+                except Exception as e:
+                    console.print(f"[error]Run failed: {e}[/error]")
 
         else:
             console.print(f"[error]Unknown: {cmd}  — /help for commands[/error]")
@@ -373,14 +533,111 @@ class ForgeChat:
     # ── Context helpers ───────────────────────────────────────────────────────
 
     def _build_context(self, prompt: str) -> RoutingContext:
-        """Create a fresh per-turn context but inject the persistent session history."""
+        """Create a per-turn context with persistent history and loaded file context."""
         ctx = router.new_context(prompt)
-        # Copy history so multi-turn context reaches the provider
         ctx.history = list(self._session_history)
+        ctx.system_prefix = self._build_file_prefix()
         return ctx
 
     def _update_history(self, ctx: RoutingContext):
         """Capture the updated history after a successful route() call."""
-        # ctx.history was mutated in-place by route() — it now has the latest assistant message
-        # Keep last 20 turns (40 entries: 20 user + 20 assistant) to bound context size
         self._session_history = ctx.history[-40:]
+
+    def _build_file_prefix(self) -> str:
+        """Render all loaded files/repos into a single context block for LLM injection."""
+        if not self._context_files:
+            return ""
+        parts = [
+            "## Project Context (loaded files — reference only, do not repeat verbatim)\n"
+        ]
+        for item in self._context_files:
+            if item["type"] == "file":
+                parts.append(f"### File: `{item['path']}`\n```{item['lang']}\n{item['content']}\n```")
+            elif item["type"] == "repo":
+                parts.append(f"### Repository: `{item['path']}`\n{item['content']}")
+        return "\n\n".join(parts)
+
+    def _read_repo(self, root: str, max_total: int = 300_000):
+        """Walk a repo directory and return (formatted_content, file_count, total_chars)."""
+        root_path = Path(root)
+        file_blocks: List[str] = []
+        tree_lines: List[str] = []
+        file_count = 0
+        total_chars = 0
+
+        # Collect all non-skipped paths for the tree
+        all_paths = []
+        for p in sorted(root_path.rglob("*")):
+            if any(part in _SKIP_DIRS for part in p.relative_to(root_path).parts):
+                continue
+            all_paths.append(p)
+
+        # Build a simple file tree (dirs + files, max 300 lines)
+        for p in all_paths[:300]:
+            rel = p.relative_to(root_path)
+            depth = len(rel.parts) - 1
+            indent = "  " * depth
+            marker = "/" if p.is_dir() else ""
+            tree_lines.append(f"{indent}{rel.name}{marker}")
+
+        tree = "```\n" + root_path.name + "/\n" + "\n".join(tree_lines) + "\n```"
+
+        # Read source files
+        for p in all_paths:
+            if p.is_dir():
+                continue
+            if p.suffix.lower() not in _SRC_EXTS and p.name not in _SRC_NAMES:
+                continue
+            try:
+                text = p.read_text(errors="replace")
+            except Exception:
+                continue
+
+            if len(text) > 30_000:
+                text = text[:30_000] + "\n... [file truncated at 30KB]"
+
+            rel = p.relative_to(root_path)
+            lang = p.suffix.lstrip(".") or "text"
+            block = f"### `{rel}`\n```{lang}\n{text}\n```"
+            file_blocks.append(block)
+            file_count += 1
+            total_chars += len(text)
+
+            if total_chars >= max_total:
+                file_blocks.append("... [repo truncated — total context limit reached]")
+                break
+
+        content = f"**File Tree:**\n{tree}\n\n**Source Files:**\n\n" + "\n\n".join(file_blocks)
+        return content, file_count, total_chars
+
+    def _extract_best_code_block(self, content: str) -> Tuple[Optional[str], str]:
+        """Return (code, lang) for the largest fenced code block in the LLM response.
+        Returns (None, '') if no code block found."""
+        matches = _CODE_BLOCK_RE.findall(content)  # [(lang, code), ...]
+        if not matches:
+            return None, ""
+        # Pick the largest block by character count
+        lang, code = max(matches, key=lambda m: len(m[1]))
+        return code.rstrip(), lang or "text"
+
+    def _save_repo_memory(self, repo_path: str, content: str, file_count: int):
+        """Persist a repo summary to the shared memory directory for cross-session recall."""
+        try:
+            MEMORY_DIR.mkdir(parents=True, exist_ok=True)
+            name = Path(repo_path).name
+            ts = datetime.datetime.now().strftime("%Y-%m-%d")
+            out = MEMORY_DIR / f"forge_repo_{name}.md"
+            # Save only the file tree + metadata, not full file contents (that's session-only)
+            tree_end = content.find("**Source Files:**")
+            tree_section = content[:tree_end].strip() if tree_end > 0 else content[:2000]
+            out.write_text(
+                f"# Repo Context: {name}\n\n"
+                f"**Path:** `{repo_path}`  \n"
+                f"**Loaded:** {ts}  \n"
+                f"**Files:** {file_count}\n\n"
+                f"{tree_section}\n\n"
+                f"_To reload in a new forge session: `/repo {repo_path}`_\n"
+            )
+            console.print(f"[dim]Memory saved → {out}[/dim]")
+        except Exception as e:
+            console.print(f"[dim]Memory save skipped: {e}[/dim]")

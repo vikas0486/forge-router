@@ -1,6 +1,6 @@
 [project]
 name = "forge-router"
-version = "0.1.0"
+version = "0.2.0"
 description = "🛠️ Forge: A high-performance AI Router & Interactive CLI in Python."
 authors = [
     { name = "Vikash", email = "vikash@example.com" }

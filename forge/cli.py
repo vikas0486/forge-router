@@ -87,10 +87,13 @@ def doctor():
     # 3. Key Detection
     console.print(f"\n[bold]API Keys:[/bold]")
     keys = {
-        "Antigravity": settings.antigravity_api_key,
-        "Gemini": settings.gemini_api_key,
         "Groq": settings.groq_api_key,
+        "Cerebras": settings.cerebras_api_key,
+        "Mistral": settings.mistral_api_key,
+        "Claude": settings.anthropic_api_key,
         "OpenAI": settings.openai_api_key,
+        "Codex": settings.codex_api_key,
+        "OpenRouter": settings.openrouter_api_key,
         "GitHub Token": settings.github_token,
     }
     for name, value in keys.items():
@@ -99,7 +102,7 @@ def doctor():
 
     # 4. Tool Detection
     console.print(f"\n[bold]External Tools:[/bold]")
-    tools = ["gemini", "copilot", "ollama", "forge"]
+    tools = ["agy", "copilot", "ollama", "forge"]
     for cmd in tools:
         path = shutil.which(cmd)
         status = f"[success]✓ found[/success] ({path})" if path else "[warning]! not found[/warning]"

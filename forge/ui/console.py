@@ -32,9 +32,9 @@ class ThinkingDisplay:
         if status:
             self.status = status
         if failed_provider:
-            # Avoid duplicate failures if same provider is reported multiple times
+            reason = status or "failed"
             if not self.history or self.history[-1][0] != failed_provider:
-                self.history.append((failed_provider, "failed"))
+                self.history.append((failed_provider, reason))
 
     def __rich__(self):
         elapsed = time.time() - self.start_time

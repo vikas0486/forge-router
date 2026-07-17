@@ -7,11 +7,12 @@ from forge.providers.base import BaseProvider, ProviderResponse
 from forge.router.observability import observability
 from forge.memory.knowledge_base import knowledge_base
 from forge.providers.antigravity import AntigravityProvider
-from forge.providers.gemini import GeminiProvider
+from forge.providers.cerebras import CerebrasProvider
 from forge.providers.groq import GroqProvider
 from forge.providers.hermes import HermesProvider
-from forge.providers.sakana import SakanaProvider
+from forge.providers.mistral import MistralProvider
 from forge.providers.claude import ClaudeProvider
+from forge.providers.openrouter import OpenRouterProvider
 from forge.providers.copilot import CopilotProvider
 from forge.providers.openai import OpenAIProvider
 from forge.providers.codex import CodexProvider
@@ -27,6 +28,10 @@ _INTENT_TIMEOUT: Dict[str, int] = {
     "reasoning":     45,
     "agentic":       60,
 }
+
+# Hard wall-clock cap per provider — if any provider (including local Ollama) exceeds
+# this, the router cancels it and tries the next in the fallback chain.
+WALL_CLOCK_TIMEOUT = 60
 
 # ── Intent Classification ────────────────────────────────────────────────────
 
@@ -62,11 +67,11 @@ def classify_intent(prompt: str) -> str:
 
 # Maps intent → ordered list of preferred provider names
 _INTENT_ROUTING: Dict[str, List[str]] = {
-    "code":          ["codex", "claude", "hermes", "openai", "groq", "ollama"],
-    "reasoning":     ["hermes", "claude", "openai", "groq", "sakana", "antigravity", "ollama"],
-    "agentic":       ["claude", "openai", "hermes", "groq", "antigravity", "ollama"],
-    "summarization": ["antigravity", "groq", "claude", "openai", "ollama"],
-    "chat":          ["groq", "antigravity", "claude", "openai", "hermes", "ollama"],
+    "chat":          ["groq", "cerebras", "antigravity", "claude", "mistral", "openai", "hermes", "openrouter", "ollama"],
+    "summarization": ["antigravity", "groq", "cerebras", "claude", "mistral", "openrouter", "openai", "ollama"],
+    "code":          ["codex", "claude", "hermes", "openrouter", "mistral", "openai", "groq", "cerebras", "ollama"],
+    "reasoning":     ["hermes", "claude", "openrouter", "mistral", "openai", "groq", "cerebras", "antigravity", "ollama"],
+    "agentic":       ["claude", "openai", "hermes", "openrouter", "groq", "cerebras", "mistral", "antigravity", "ollama"],
 }
 
 # ── Context Transfer ─────────────────────────────────────────────────────────
@@ -78,6 +83,9 @@ class RoutingContext:
         self.intent = classify_intent(prompt)
         self.tried: List[str] = []
         self.history: List[Dict[str, str]] = []  # [{role, content}]
+        # File/repo context loaded via /file or /repo — injected into EVERY provider call
+        # so switching LLMs mid-session never loses the loaded project context.
+        self.system_prefix: str = ""
 
     def add_user_message(self, content: str):
         self.history.append({"role": "user", "content": content})
@@ -88,29 +96,42 @@ class RoutingContext:
 
     def build_prompt_with_context(self) -> str:
         if not self.history:
-            return self.original_prompt
-        lines = []
-        for msg in self.history[-6:]:  # last 3 turns max
-            lines.append(f"{msg['role'].upper()}: {msg['content']}")
-        lines.append(f"USER: {self.original_prompt}")
-        return "\n".join(lines)
+            base = self.original_prompt
+        else:
+            lines = []
+            for msg in self.history[-6:]:  # last 3 turns max
+                lines.append(f"{msg['role'].upper()}: {msg['content']}")
+            lines.append(f"USER: {self.original_prompt}")
+            base = "\n".join(lines)
+        if self.system_prefix:
+            return f"{self.system_prefix}\n\n---\n\n{base}"
+        return base
 
 # ── Router Engine ────────────────────────────────────────────────────────────
 
 class RouterEngine:
     def __init__(self):
-        self._all_providers: List[BaseProvider] = [
-            AntigravityProvider(),
-            GeminiProvider(),
-            GroqProvider(),
-            HermesProvider(),
-            SakanaProvider(),
-            ClaudeProvider(),
-            CopilotProvider(),
-            OpenAIProvider(),
-            CodexProvider(),
-            OllamaProvider(),
+        self.providers = [
+            AntigravityProvider(),   # Gemini Flash via agy CLI (priority 0)
+            CerebrasProvider(),      # wafer-scale, rivals Groq speed (priority 1)
+            GroqProvider(),          # LLaMA 3.3 70B, fast (priority 2)
+            HermesProvider(),        # Groq + Hermes persona (priority 3)
+            MistralProvider(),       # mistral-small, free, different arch (priority 3)
+            ClaudeProvider(),        # claude-sonnet-4-6 (priority 3)
+            OpenRouterProvider(),    # DeepSeek-R1, Qwen-32B-Coder, LLaMA-70B (priority 5)
+            CopilotProvider(),       # GitHub Copilot CLI (priority 5)
+            OpenAIProvider(),        # gpt-4o (priority 6)
+            CodexProvider(),         # codex-mini-latest (priority 4)
+            OllamaProvider(),        # local CPU fallback (priority 7)
         ]
+
+    @property
+    def providers(self) -> List[BaseProvider]:
+        return self._all_providers
+
+    @providers.setter
+    def providers(self, providers: List[BaseProvider]) -> None:
+        self._all_providers = providers
         self._by_name: Dict[str, BaseProvider] = {p.name: p for p in self._all_providers}
 
     def _ordered_for_intent(self, intent: str) -> List[BaseProvider]:
@@ -155,9 +176,10 @@ class RouterEngine:
         memory_block = knowledge_base.build_context_block(memories)
         if memory_block:
             logger.info(f"[kb] Injecting {len(memories)} memories into prompt")
-            effective_prompt = f"{memory_block}\n\n{prompt}"
+            base = f"{memory_block}\n\n{prompt}"
+            effective_prompt = f"{ctx.system_prefix}\n\n---\n\n{base}" if ctx.system_prefix else base
         else:
-            effective_prompt = ctx.build_prompt_with_context() if ctx.history else prompt
+            effective_prompt = ctx.build_prompt_with_context()
 
         def _progress(name: str, status: str, failed: bool = False):
             if on_progress:
@@ -187,15 +209,28 @@ class RouterEngine:
             asyncio.ensure_future(_record_and_score())
 
         # 1. Explicit preferred provider
+        if preferred and preferred not in self._by_name:
+            known = ", ".join(sorted(self._by_name.keys()))
+            logger.warning(f"[router] unknown provider '{preferred}' — valid: {known}")
+            _progress(preferred, f"Unknown provider '{preferred}' — falling back to auto", failed=True)
+            preferred = None
+
         if preferred and preferred in self._by_name:
             p = self._by_name[preferred]
             _progress(p.name, "Using preferred provider...")
             try:
                 t0 = time.time()
-                resp = await p.generate(effective_prompt, timeout=timeout, image=image)
+                resp = await asyncio.wait_for(
+                    p.generate(effective_prompt, timeout=timeout, image=image),
+                    timeout=WALL_CLOCK_TIMEOUT,
+                )
                 ctx.add_assistant_message(p.name, resp.content)
                 _fire_score(resp, t0)
                 return resp
+            except asyncio.TimeoutError:
+                elapsed = round(time.time() - t0)
+                _progress(p.name, f"Preferred timed out ({elapsed}s > {WALL_CLOCK_TIMEOUT}s) — falling back", failed=True)
+                logger.warning(f"[router] preferred {preferred} wall-clock timeout after {elapsed}s")
             except Exception as e:
                 _progress(p.name, f"Preferred failed: {e}", failed=True)
                 logger.warning(f"[router] preferred {preferred} failed: {e}")
@@ -208,18 +243,27 @@ class RouterEngine:
 
             health = await p.check_health()
             if not health["ok"]:
-                _progress(p.name, f"Unhealthy: {health.get('reason')}", failed=True)
-                logger.debug(f"[router] skip {p.name}: {health.get('reason')}")
+                reason = health.get("reason", "unhealthy")
+                _progress(p.name, f"Unhealthy: {reason}", failed=True)
+                logger.warning(f"[router] skip {p.name}: {reason}")
                 continue
 
             _progress(p.name, f"Trying [{intent}] → {p.name}...")
             try:
                 t0 = time.time()
-                resp = await p.generate(effective_prompt, timeout=timeout, image=image)
+                resp = await asyncio.wait_for(
+                    p.generate(effective_prompt, timeout=timeout, image=image),
+                    timeout=WALL_CLOCK_TIMEOUT,
+                )
                 ctx.add_assistant_message(p.name, resp.content)
                 logger.info(f"[router] success: {p.name} (intent={intent})")
                 _fire_score(resp, t0)
                 return resp
+            except asyncio.TimeoutError:
+                elapsed = round(time.time() - t0)
+                msg = f"Timed out ({elapsed}s > {WALL_CLOCK_TIMEOUT}s) — switching"
+                _progress(p.name, msg, failed=True)
+                logger.warning(f"[router] {p.name} wall-clock timeout after {elapsed}s")
             except Exception as e:
                 _progress(p.name, f"Failed: {e}", failed=True)
                 logger.error(f"[router] {p.name} failed: {e}")
