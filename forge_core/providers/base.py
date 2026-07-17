@@ -12,9 +12,13 @@ class ProviderResponse:
         self.model = model
 
 class BaseProvider(ABC):
-    def __init__(self, name: str, priority: int):
+    def __init__(self, name: str, priority: int, max_context_chars: int = 60_000):
         self.name = name
         self.priority = priority
+        # Input budget in characters (~4 chars/token). The router fits the
+        # assembled prompt to this per provider, so a huge /repo context is
+        # relevance-trimmed for tight free tiers (Groq TPM) instead of 413ing.
+        self.max_context_chars = max_context_chars
 
     @abstractmethod
     async def generate(self, prompt: str, image: Optional[Dict[str, Any]] = None, timeout: int = 30) -> ProviderResponse:

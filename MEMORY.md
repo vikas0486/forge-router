@@ -31,6 +31,7 @@ All under `~/.forge/`: `kb/` (FAISS+SQLite), `repo-memory/`, `logs/observability
 
 ## Key Features
 - Local-file bridge: any real file/dir path typed in a chat prompt is auto-read locally and injected into context — cloud LLMs (Groq etc.) "see" local files through forge (`_auto_load_paths` in chat.py)
+- Adaptive context fitting: each provider has `max_context_chars` (groq/hermes 32K, ollama 6K, claude 400K...); router relevance-trims file/repo context per provider (`shrink_context` in engine.py) — fixes Groq free-tier TPM 413s on big /repo loads
 
 ## Status
-v0.3.0 — Phase 0 complete: `forge_core` extracted (gateway-ready engine). Next: Phase 1 FastAPI gateway (`/v1/messages` + `/v1/chat/completions`, virtual keys).
+v0.4.0 — Phase 0 complete + adaptive context fitting: `forge_core` extracted (gateway-ready engine). Next: Phase 1 FastAPI gateway (`/v1/messages` + `/v1/chat/completions`, virtual keys).

@@ -16,7 +16,7 @@ BASE_URL = "https://api.mistral.ai/v1/chat/completions"
 
 class MistralProvider(BaseProvider):
     def __init__(self):
-        super().__init__(name="mistral", priority=3)  # Same tier as claude/hermes
+        super().__init__(name="mistral", priority=3, max_context_chars=100_000)  # Same tier as claude/hermes
 
     async def generate(self, prompt: str, image: Optional[Dict[str, Any]] = None, timeout: int = 30) -> ProviderResponse:
         key = settings.mistral_api_key or ""

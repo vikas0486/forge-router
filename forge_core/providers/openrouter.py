@@ -24,7 +24,7 @@ BASE_URL = "https://openrouter.ai/api/v1/chat/completions"
 
 class OpenRouterProvider(BaseProvider):
     def __init__(self):
-        super().__init__(name="openrouter", priority=5)
+        super().__init__(name="openrouter", priority=5, max_context_chars=100_000)
 
     def _model_for(self, prompt: str) -> str:
         p = prompt.lower()

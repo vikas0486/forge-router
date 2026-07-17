@@ -10,7 +10,7 @@ AGY_BIN = shutil.which("agy") or "/Users/vikash/.local/bin/agy"
 
 class AntigravityProvider(BaseProvider):
     def __init__(self):
-        super().__init__(name="antigravity", priority=0)
+        super().__init__(name="antigravity", priority=0, max_context_chars=200_000)
 
     async def generate(self, prompt: str, image: Optional[Dict[str, Any]] = None, timeout: int = 30) -> ProviderResponse:
         if not shutil.which("agy") and not __import__("os").path.exists(AGY_BIN):

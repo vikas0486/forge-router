@@ -8,7 +8,7 @@ logger = logging.getLogger("forge_core.providers.copilot")
 
 class CopilotProvider(BaseProvider):
     def __init__(self):
-        super().__init__(name="copilot", priority=5)
+        super().__init__(name="copilot", priority=5, max_context_chars=60_000)
 
     async def generate(self, prompt: str, image: Optional[Dict[str, Any]] = None, timeout: int = 30) -> ProviderResponse:
         try:

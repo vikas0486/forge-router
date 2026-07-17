@@ -74,6 +74,59 @@ _INTENT_ROUTING: Dict[str, List[str]] = {
     "agentic":       ["claude", "openai", "hermes", "openrouter", "groq", "cerebras", "mistral", "antigravity", "ollama"],
 }
 
+# ── Adaptive Context Fitting ─────────────────────────────────────────────────
+# File/repo context is split into "### " sections; when it exceeds a provider's
+# input budget, the sections most relevant to the prompt are kept. This lets
+# tight free tiers (Groq TPM 12K) work with huge /repo contexts that big-window
+# providers (Claude, GPT-4o) receive in full.
+
+_SECTION_SPLIT_RE = re.compile(r'\n(?=### )')
+_TERM_RE = re.compile(r'[A-Za-z_][A-Za-z0-9_]{3,}')
+
+
+def shrink_context(prefix: str, prompt: str, budget: int) -> str:
+    """Fit a file/repo context block into `budget` chars, preferring sections
+    relevant to the prompt. Returns prefix unchanged when it already fits."""
+    if len(prefix) <= budget:
+        return prefix
+    if budget < 500:
+        return ""
+
+    sections = _SECTION_SPLIT_RE.split(prefix)
+    head, body = sections[0], sections[1:]
+    if len(head) > budget:
+        return head[: budget - 60] + "\n... [context header truncated to fit model limit]"
+
+    terms = {t.lower() for t in _TERM_RE.findall(prompt)}
+
+    def score(sec: str) -> float:
+        first_line = sec.split("\n", 1)[0].lower()   # "### File: `path`" / "### `rel`"
+        low = sec[:4000].lower()
+        return (
+            sum(3.0 for t in terms if t in first_line)
+            + sum(min(low.count(t), 3) * 0.5 for t in terms)
+        )
+
+    ranked = sorted(range(len(body)), key=lambda i: score(body[i]), reverse=True)
+    chosen: set = set()
+    # Reserve room for the trailing trim note and per-section join newlines
+    used = len(head) + 160 + len(body)
+    for i in ranked:
+        if used + len(body[i]) <= budget:
+            chosen.add(i)
+            used += len(body[i])
+    if not chosen and body:
+        room = budget - used - 80
+        if room > 500:
+            best = ranked[0]
+            body[best] = body[best][:room] + "\n... [section truncated to fit model limit]"
+            chosen.add(best)
+
+    kept = [body[i] for i in sorted(chosen)]   # preserve original file order
+    note = f"\n\n[Context auto-trimmed to this model's input limit: {len(kept)} of {len(body)} sections included]"
+    return head + "\n" + "\n".join(kept) + note
+
+
 # ── Context Transfer ─────────────────────────────────────────────────────────
 
 class RoutingContext:
@@ -94,15 +147,19 @@ class RoutingContext:
         self.history.append({"role": "assistant", "content": content})
         logger.info(f"[context-transfer] Response stored from {provider} ({len(content)} chars)")
 
-    def build_prompt_with_context(self) -> str:
+    def build_history_base(self) -> str:
+        """History + current prompt, WITHOUT the file/repo prefix (which is
+        fitted per provider in route())."""
         if not self.history:
-            base = self.original_prompt
-        else:
-            lines = []
-            for msg in self.history[-6:]:  # last 3 turns max
-                lines.append(f"{msg['role'].upper()}: {msg['content']}")
-            lines.append(f"USER: {self.original_prompt}")
-            base = "\n".join(lines)
+            return self.original_prompt
+        lines = []
+        for msg in self.history[-6:]:  # last 3 turns max
+            lines.append(f"{msg['role'].upper()}: {msg['content']}")
+        lines.append(f"USER: {self.original_prompt}")
+        return "\n".join(lines)
+
+    def build_prompt_with_context(self) -> str:
+        base = self.build_history_base()
         if self.system_prefix:
             return f"{self.system_prefix}\n\n---\n\n{base}"
         return base
@@ -176,10 +233,24 @@ class RouterEngine:
         memory_block = knowledge_base.build_context_block(memories)
         if memory_block:
             logger.info(f"[kb] Injecting {len(memories)} memories into prompt")
-            base = f"{memory_block}\n\n{prompt}"
-            effective_prompt = f"{ctx.system_prefix}\n\n---\n\n{base}" if ctx.system_prefix else base
+            base_prompt = f"{memory_block}\n\n{prompt}"
         else:
-            effective_prompt = ctx.build_prompt_with_context()
+            base_prompt = ctx.build_history_base()
+
+        def _prompt_for(p: BaseProvider) -> str:
+            """Assemble the prompt fitted to this provider's input budget."""
+            if not ctx.system_prefix:
+                return base_prompt
+            prefix_budget = p.max_context_chars - len(base_prompt) - 16
+            prefix = shrink_context(ctx.system_prefix, prompt, prefix_budget)
+            if len(prefix) < len(ctx.system_prefix):
+                logger.info(
+                    f"[context-fit] {p.name}: context {len(ctx.system_prefix):,} chars "
+                    f"→ {len(prefix):,} (budget {p.max_context_chars:,})"
+                )
+            if not prefix:
+                return base_prompt
+            return f"{prefix}\n\n---\n\n{base_prompt}"
 
         def _progress(name: str, status: str, failed: bool = False):
             if on_progress:
@@ -221,7 +292,7 @@ class RouterEngine:
             try:
                 t0 = time.time()
                 resp = await asyncio.wait_for(
-                    p.generate(effective_prompt, timeout=timeout, image=image),
+                    p.generate(_prompt_for(p), timeout=timeout, image=image),
                     timeout=WALL_CLOCK_TIMEOUT,
                 )
                 ctx.add_assistant_message(p.name, resp.content)
@@ -252,7 +323,7 @@ class RouterEngine:
             try:
                 t0 = time.time()
                 resp = await asyncio.wait_for(
-                    p.generate(effective_prompt, timeout=timeout, image=image),
+                    p.generate(_prompt_for(p), timeout=timeout, image=image),
                     timeout=WALL_CLOCK_TIMEOUT,
                 )
                 ctx.add_assistant_message(p.name, resp.content)

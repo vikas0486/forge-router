@@ -15,7 +15,7 @@ BASE_URL = "https://api.cerebras.ai/v1/chat/completions"
 
 class CerebrasProvider(BaseProvider):
     def __init__(self):
-        super().__init__(name="cerebras", priority=1)  # Between antigravity(0) and groq(2)
+        super().__init__(name="cerebras", priority=1, max_context_chars=48_000)  # Between antigravity(0) and groq(2)
 
     async def generate(self, prompt: str, image: Optional[Dict[str, Any]] = None, timeout: int = 30) -> ProviderResponse:
         key = settings.cerebras_api_key or ""

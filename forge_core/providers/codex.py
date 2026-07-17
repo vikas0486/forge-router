@@ -8,7 +8,7 @@ logger = logging.getLogger("forge_core.providers.codex")
 
 class CodexProvider(BaseProvider):
     def __init__(self):
-        super().__init__(name="codex", priority=4)
+        super().__init__(name="codex", priority=4, max_context_chars=300_000)
 
     def _api_key(self) -> Optional[str]:
         return settings.codex_api_key or settings.openai_api_key

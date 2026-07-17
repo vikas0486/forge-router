@@ -8,7 +8,7 @@ logger = logging.getLogger("forge_core.providers.claude")
 
 class ClaudeProvider(BaseProvider):
     def __init__(self):
-        super().__init__(name="claude", priority=3)
+        super().__init__(name="claude", priority=3, max_context_chars=400_000)
         self.url = "https://api.anthropic.com/v1/messages"
 
     async def generate(self, prompt: str, image: Optional[Dict[str, Any]] = None, timeout: int = 30) -> ProviderResponse:

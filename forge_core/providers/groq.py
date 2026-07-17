@@ -8,7 +8,7 @@ logger = logging.getLogger("forge_core.providers.groq")
 
 class GroqProvider(BaseProvider):
     def __init__(self):
-        super().__init__(name="groq", priority=2)
+        super().__init__(name="groq", priority=2, max_context_chars=32_000)
         self.url = "https://api.groq.com/openai/v1/chat/completions"
 
     async def generate(self, prompt: str, image: Optional[Dict[str, Any]] = None, timeout: int = 30) -> ProviderResponse:

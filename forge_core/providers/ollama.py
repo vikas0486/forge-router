@@ -39,7 +39,7 @@ _PERF_OPTIONS = {
 
 class OllamaProvider(BaseProvider):
     def __init__(self):
-        super().__init__(name="ollama", priority=7)
+        super().__init__(name="ollama", priority=7, max_context_chars=6_000)
         self._base = settings.ollama_base_url
         self._available: List[str] = []
 

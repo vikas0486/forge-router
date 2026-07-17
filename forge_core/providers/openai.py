@@ -8,7 +8,7 @@ logger = logging.getLogger("forge_core.providers.openai")
 
 class OpenAIProvider(BaseProvider):
     def __init__(self):
-        super().__init__(name="openai", priority=6)
+        super().__init__(name="openai", priority=6, max_context_chars=300_000)
         self.url = "https://api.openai.com/v1/chat/completions"
 
     async def generate(self, prompt: str, image: Optional[Dict[str, Any]] = None, timeout: int = 30) -> ProviderResponse:

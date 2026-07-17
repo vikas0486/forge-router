@@ -21,7 +21,7 @@ OLLAMA_HERMES_MODELS = ["hermes3:latest", "hermes3:8b", "nous-hermes2:latest", "
 
 class HermesProvider(BaseProvider):
     def __init__(self):
-        super().__init__(name="hermes", priority=3)
+        super().__init__(name="hermes", priority=3, max_context_chars=32_000)
         self._groq_url = "https://api.groq.com/openai/v1/chat/completions"
         self._groq_model = "llama-3.3-70b-versatile"
         self._ollama_url = "http://localhost:11434/api/chat"

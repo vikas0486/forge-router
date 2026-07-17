@@ -102,6 +102,23 @@ Forge ❯ Can you review /Users/vikash/Documents/Projects/saturs/app.py?
 
 Works with files and whole directories (loaded as a repo tree), skips binaries, caps at 120KB/file, and stays loaded for the whole session across provider failovers. Explicit `/file` and `/repo` commands still work for fine control.
 
+### Adaptive context fitting (per-provider input budgets)
+
+Providers have wildly different input limits — Groq's free tier allows 12K tokens/minute while Claude takes 200K tokens. Instead of sending one giant prompt to everyone (and getting 413s from tight tiers), the router **fits the context to each provider individually**: file/repo sections are scored for relevance against your question and the best ones are kept within that provider's budget.
+
+| Provider | Budget (chars ≈ tokens/4) | Constraint |
+|---|---|---|
+| claude | 400,000 | 200K-token window |
+| openai / codex | 300,000 | 128K+ token windows |
+| antigravity | 200,000 | Gemini Flash 1M ctx, CLI arg-length bound |
+| mistral / openrouter | 100,000 | 32K-token windows |
+| copilot | 60,000 | CLI arg-length bound |
+| cerebras | 48,000 | free-tier per-minute limits |
+| groq / hermes | 32,000 | free-tier TPM 12,000 |
+| ollama | 6,000 | num_ctx=2048 on CPU |
+
+So a 230K-char repo goes to Claude in full, while Groq receives a relevance-selected 32K slice — and both answer from your local files. A `[Context auto-trimmed…]` note tells the model (and you, in logs) when trimming happened.
+
 ## Agentic File Operations
 
 The core workflow: load a repo, ask any LLM to write/fix code, save it, run it, iterate — without leaving forge.
