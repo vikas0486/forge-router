@@ -18,7 +18,7 @@ graph TD
     subgraph Providers [11 LLM Providers]
         P0[Antigravity — Gemini Flash via agy CLI]
         P1[Cerebras — gpt-oss-120b]
-        P2[Groq — LLaMA 3.3 70B]
+        P2[Groq — gpt-oss-120B / LLaMA 3.3 70B]
         P3[Hermes — Groq backend]
         P4[Mistral — mistral-small]
         P5[Claude — Anthropic]
@@ -114,7 +114,8 @@ Providers have wildly different input limits — Groq's free tier allows 12K tok
 | mistral / openrouter | 100,000 | 32K-token windows |
 | copilot | 60,000 | CLI arg-length bound |
 | cerebras | 48,000 | free-tier per-minute limits |
-| groq / hermes | 32,000 | free-tier TPM 12,000 |
+| hermes | 32,000 | free-tier TPM 12,000 |
+| groq | 24,000 | gpt-oss-120b free-tier TPM 8,000 |
 | ollama | 6,000 | num_ctx=2048 on CPU |
 
 So a 230K-char repo goes to Claude in full, while Groq receives a relevance-selected 32K slice — and both answer from your local files. A `[Context auto-trimmed…]` note tells the model (and you, in logs) when trimming happened.
