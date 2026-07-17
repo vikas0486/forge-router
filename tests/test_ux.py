@@ -93,3 +93,15 @@ def test_auto_load_skips_binary(tmp_path):
     with patch("forge.chat.console.print"):
         chat._auto_load_paths(f"read {b}")
     assert chat._context_files == []
+
+
+def test_visual_prompt_detection():
+    """Prompts asking for visuals should trigger the preview, plain ones not."""
+    from forge.chat import _wants_visual
+    for p in ("draw a diagram of a fish", "make some ascii art", "generate an image of a cat",
+              "Draw a mermaid flowchart", "create a video intro", "sketch the architecture",
+              "show me a photo", "plot the latency graph"):
+        assert _wants_visual(p), p
+    for p in ("explain the routing engine", "fix this bug", "hello how are you",
+              "write a bash script"):
+        assert not _wants_visual(p), p

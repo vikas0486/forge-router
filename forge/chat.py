@@ -69,6 +69,21 @@ def _has_visual(text: str) -> bool:
     return bool(_VISUAL_RE.search(text))
 
 
+# ── Visual-intent detector (user prompt) ─────────────────────────────────────
+# When the USER asks for anything visual, open the preview even if the response
+# is plain ASCII art / fenced text the content detector can't recognize.
+_VISUAL_PROMPT_RE = re.compile(
+    r'\b(draw|sketch|paint|art|ascii|diagram|chart|graph|flowchart|mermaid|svg'
+    r'|image|photo|picture|pic|video|animation|animate|visuali[sz]e|render'
+    r'|plot|wireframe|mockup|logo|icon|banner|infographic|illustration)\b',
+    re.IGNORECASE,
+)
+
+
+def _wants_visual(prompt: str) -> bool:
+    return bool(_VISUAL_PROMPT_RE.search(prompt))
+
+
 class ForgeChat:
     def __init__(self, preferred_model: Optional[str] = None, preview_mode: bool = False):
         self.preferred_model = preferred_model
@@ -167,12 +182,13 @@ class ForgeChat:
                 console.print(f"[error]Preview failed to start (port conflict?): {e}[/error]")
                 console.print("[dim]Try again in a moment — previous session may still be releasing the port.[/dim]")
 
-    def _auto_preview(self, content: str):
-        """Auto-open preview when visual content is detected, unless user said OFF.
+    def _auto_preview(self, content: str, prompt: str = ""):
+        """Auto-open preview when visual content is detected OR the user asked
+        for something visual (draw/art/diagram/image...), unless user said OFF.
         Also re-raises the window if it was closed externally."""
         if self._preview_explicit is False:
             return  # user explicitly disabled — respect that
-        if not _has_visual(content):
+        if not (_has_visual(content) or _wants_visual(prompt)):
             return
         # Sync state if user closed the window with X
         if preview.active and not preview.window_alive:
@@ -191,13 +207,14 @@ class ForgeChat:
             # Server running but window was closed by X — reopen window only
             preview.start()
 
-    def _push_to_preview(self, content: str):
+    def _push_to_preview(self, content: str, force: bool = False):
         """Update the live preview window.
         - Visual content (mermaid/images/media): always push, clears previous state.
+        - force=True (user asked for something visual): push even plain ASCII art.
         - Plain text: only push if preview is already open (don't auto-update a stale window)."""
         if not preview.active or not preview.window_alive:
             return
-        if not _has_visual(content):
+        if not (_has_visual(content) or force):
             return  # window stays showing last state; text-only responses don't replace it
         preview.write(
             content,
@@ -521,9 +538,9 @@ class ForgeChat:
                 self._last_response_model = self.last_model
                 self._last_response_msg_count = self.msg_count
 
-                # Auto-open preview for visual content; push update if already open
-                self._auto_preview(response.content)
-                self._push_to_preview(response.content)
+                # Auto-open preview for visual content or visual prompts; push update if open
+                self._auto_preview(response.content, prompt=user_input)
+                self._push_to_preview(response.content, force=_wants_visual(user_input))
 
             except KeyboardInterrupt:
                 if self._ctrl_p_pending:
