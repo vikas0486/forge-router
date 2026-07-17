@@ -24,7 +24,7 @@ class ThinkingDisplay:
         self.start_time = time.time()
         self.current_provider = initial_provider
         self.status = "Forging response..."
-        self.history = [] # List of (provider, result) e.g. ("Gemini", "failed")
+        self.history = [] # List of (provider, result) e.g. ("groq", "Timed out")
 
     def update(self, provider: str = None, status: str = None, failed_provider: str = None):
         if provider:

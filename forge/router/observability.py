@@ -2,8 +2,8 @@
 Hermes Observability Layer
 --------------------------
 Async quality judge that runs AFTER every LLM response.
-Primary judge: Hermes-3 via Groq (fast, strong instruction-following).
-Fallback judge: local Ollama model (qwen3 or deepseek-r1) — no network dependency.
+Primary judge: llama-3.3-70b-versatile via Groq (fast, strong instruction-following).
+Fallback judge: local Ollama model (llama3.1:8b or nous-hermes2) — no network dependency.
 
 Scores feed back into routing preference over time.
 """
@@ -97,7 +97,7 @@ class HermesObservability:
                     self._groq_url,
                     headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
                     json={
-                        "model": "hermes-3-llama-3.1-70b-8192",
+                        "model": "llama-3.3-70b-versatile",
                         "messages": [{"role": "user", "content": judge_input}],
                         "temperature": 0.1,
                         "max_tokens": 150,
@@ -112,7 +112,7 @@ class HermesObservability:
             return None
 
     async def _judge_local(self, judge_input: str, provider: str, intent: str, latency_ms: float) -> Optional[QualityScore]:
-        # Try local models in order — prefer qwen3 (fast) then deepseek-r1
+        # Benchmarked-safe local models on Intel i7 CPU (17s / 28s)
         for model in ("llama3.1:8b", "nous-hermes2:latest"):
             try:
                 async with httpx.AsyncClient(timeout=20) as client:

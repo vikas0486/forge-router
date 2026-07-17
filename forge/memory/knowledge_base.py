@@ -8,7 +8,7 @@ Lifecycle:
   - On each new prompt: top-K relevant memories are retrieved and injected as context.
 """
 import asyncio
-import json
+import httpx
 import logging
 import sqlite3
 import time
@@ -25,7 +25,7 @@ except ImportError:
     np = None     # type: ignore
     _FAISS_OK = False
 
-from forge.memory.embedder import embed, cosine_similarity
+from forge.memory.embedder import embed
 
 logger = logging.getLogger("forge.memory.kb")
 
@@ -272,13 +272,13 @@ Facts:"""
             except Exception as e:
                 logger.debug(f"[kb] Groq extraction failed: {e}")
 
-        # Fallback to local qwen3
+        # Fallback to fastest benchmarked local model (llama3.1:8b — 17s on Intel i7)
         try:
             async with httpx.AsyncClient(timeout=30) as c:
                 r = await c.post(
                     "http://localhost:11434/api/chat",
                     json={
-                        "model": "qwen3:latest",
+                        "model": "llama3.1:8b",
                         "messages": [{"role": "user", "content": prompt}],
                         "stream": False,
                         "options": {"temperature": 0.3, "num_predict": 300},
@@ -290,8 +290,6 @@ Facts:"""
             logger.debug(f"[kb] Local extraction failed: {e}")
         return None
 
-
-import httpx  # needed by _call_fast_llm
 
 # Singleton
 knowledge_base = ForgeKnowledgeBase()

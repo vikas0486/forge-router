@@ -1,9 +1,9 @@
 [project]
 name = "forge-router"
-version = "0.2.0"
+version = "0.2.1"
 description = "🛠️ Forge: A high-performance AI Router & Interactive CLI in Python."
 authors = [
-    { name = "Vikash", email = "vikash@example.com" }
+    { name = "Vikash Jaiswal", email = "vikashjaiswal.486@gmail.com" }
 ]
 dependencies = [
     "typer>=0.12.3",

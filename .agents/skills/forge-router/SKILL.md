@@ -24,7 +24,7 @@ forge/
 ├── router/
 │   ├── engine.py           # RouterEngine, RoutingContext, intent classifier
 │   └── observability.py    # Quality and latency scoring per provider
-├── providers/              # 10 provider adapters (extending BaseProvider)
+├── providers/              # 11 provider adapters (extending BaseProvider)
 │   ├── base.py             # Abstract BaseProvider and ProviderResponse class
 │   ├── antigravity.py      # Antigravity (agy CLI — Priority 0 Gemini Flash)
 │   ├── cerebras.py         # Cerebras wafer-scale fast inference API
@@ -51,7 +51,6 @@ forge/
 ---
 
 ## 3. Google Antigravity Integration
-The old Google Gemini CLI integration is deprecated and fully replaced by the **Antigravity (`agy`) CLI integration**:
 *   **Adapter File**: [forge/providers/antigravity.py](file:///Users/vikash/Documents/Projects/forge-router/forge/providers/antigravity.py)
 *   **Priority**: Priority 0 (primary provider for chat and default routing).
 *   **Execution Model**: Executes `agy --print "<prompt>"` asynchronously using `asyncio.create_subprocess_exec` so it does not block the Python runtime.
