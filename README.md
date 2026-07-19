@@ -324,7 +324,11 @@ keys directly.
 ```bash
 forge gateway keys create my-key         # prints an fk-... key once
 forge gateway serve --port 8099          # start the gateway
-forge gateway top                        # per-key usage (estimated tokens)
+forge gateway top                        # per-key usage (reported when available, else estimated)
+forge chat                               # interactive REPL
+# inside chat:
+/usage                                   # current session token usage
+/usage total                             # aggregate from ~/.forge/session-usage.jsonl
 
 # point a client at it:
 ANTHROPIC_BASE_URL=http://127.0.0.1:8099 ANTHROPIC_API_KEY=fk-... claude
@@ -339,7 +343,8 @@ Requests route through the full intent router to the cheapest healthy provider
 Anthropic.
 
 **Not yet:** streaming (SSE), `POST /v1/chat/completions` (OpenAI), `GET /v1/models`,
-real provider-reported token counts (metering is a ~4-chars/token estimate).
+budgets/quotas, and a full usage dashboard. Gateway metering now prefers provider-reported
+counts when the backend returns them and falls back to a ~4-chars/token estimate otherwise.
 
 ---
 

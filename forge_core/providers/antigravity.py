@@ -31,7 +31,13 @@ class AntigravityProvider(BaseProvider):
             raise ValueError(f"agy exited {proc.returncode}: {stderr.decode()[:200]}")
 
         content = stdout.decode().strip()
-        return ProviderResponse(provider=self.name, content=self._validate_content(content), model="agy")
+        content = self._validate_content(content)
+        return ProviderResponse(
+            provider=self.name,
+            content=content,
+            model="agy",
+            usage=self._estimated_usage(prompt, content),
+        )
 
     async def check_health(self) -> Dict[str, Any]:
         import os

@@ -147,7 +147,9 @@ def create_app(store: Optional[GatewayStore] = None) -> FastAPI:
             raise HTTPException(502, f"all providers failed: {e}")
 
         latency_ms = round((time.time() - t0) * 1000, 1)
-        in_tok, out_tok = _est_tokens(prompt), _est_tokens(resp.content)
+        usage = resp.usage
+        in_tok = usage.input_tokens if usage else _est_tokens(prompt)
+        out_tok = usage.output_tokens if usage else _est_tokens(resp.content)
         get_store().record_usage(
             key_name=identity["name"], endpoint="/v1/messages",
             model_requested=model, provider=resp.provider, model_used=resp.model,

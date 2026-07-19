@@ -9,7 +9,7 @@ from unittest.mock import patch
 import pytest
 from fastapi.testclient import TestClient
 
-from forge_core.providers.base import ProviderResponse
+from forge_core.providers.base import ProviderResponse, UsageInfo
 from forge_gateway import create_app
 from forge_gateway.store import GatewayStore
 
@@ -59,7 +59,12 @@ def test_bad_key_401(client):
 # ── endpoint ─────────────────────────────────────────────────────────────────
 
 async def _fake_route(prompt, preferred=None, context=None, **kw):
-    return ProviderResponse(provider="groq", content="hi there", model="llama-3.3-70b")
+    return ProviderResponse(
+        provider="groq",
+        content="hi there",
+        model="llama-3.3-70b",
+        usage=UsageInfo.from_counts(21, 9, 30, estimated=False),
+    )
 
 
 def test_messages_ok_and_metered(client, store):
@@ -75,7 +80,8 @@ def test_messages_ok_and_metered(client, store):
     assert d["type"] == "message"
     assert d["content"][0]["text"] == "hi there"
     assert d["forge_provider"] == "groq"
-    assert d["usage"]["input_tokens"] >= 1
+    assert d["usage"]["input_tokens"] == 21
+    assert d["usage"]["output_tokens"] == 9
     top = store.top()
     assert top and top[0]["key_name"] == "cc" and top[0]["requests"] == 1
 

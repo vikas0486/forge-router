@@ -85,8 +85,14 @@ class OllamaProvider(BaseProvider):
             )
             if resp.status_code != 200:
                 raise ValueError(f"Ollama error ({resp.status_code}): {resp.text[:200]}")
-            content = resp.json()["message"]["content"]
-            return ProviderResponse(provider=self.name, content=self._validate_content(content), model=model)
+            data = resp.json()
+            content = self._validate_content(data["message"]["content"])
+            return ProviderResponse(
+                provider=self.name,
+                content=content,
+                model=model,
+                usage=self._usage_from_ollama(data) or self._estimated_usage(prompt, content),
+            )
 
     def _detect_intent(self, prompt: str) -> str:
         p = prompt.lower()

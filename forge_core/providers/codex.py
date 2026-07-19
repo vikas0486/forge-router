@@ -51,7 +51,12 @@ class CodexProvider(BaseProvider):
             data = response.json()
             content = self._extract_content(data)
             content = self._validate_content(content)
-            return ProviderResponse(provider=self.name, content=content, model=settings.codex_model)
+            return ProviderResponse(
+                provider=self.name,
+                content=content,
+                model=settings.codex_model,
+                usage=self._usage_from_openai(data) or self._estimated_usage(prompt, content),
+            )
 
     async def check_health(self) -> Dict[str, Any]:
         if not self._api_key():

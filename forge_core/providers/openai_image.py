@@ -76,7 +76,12 @@ class OpenAIImageProvider(BaseProvider):
             f"Generated image with `{IMAGE_MODEL}`.\n\n"
             f"![Generated image](/generated/{filename})"
         )
-        return ProviderResponse(provider=self.name, content=markdown, model=IMAGE_MODEL)
+        return ProviderResponse(
+            provider=self.name,
+            content=markdown,
+            model=IMAGE_MODEL,
+            usage=self._usage_from_openai(data) or self._estimated_usage(prompt, markdown),
+        )
 
     async def check_health(self) -> Dict[str, Any]:
         if not self._api_key():

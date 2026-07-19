@@ -45,7 +45,13 @@ class MistralProvider(BaseProvider):
         data = resp.json()
         content = data["choices"][0]["message"]["content"]
         model = data.get("model", "mistral-small-latest")
-        return ProviderResponse(provider=self.name, content=self._validate_content(content), model=model)
+        content = self._validate_content(content)
+        return ProviderResponse(
+            provider=self.name,
+            content=content,
+            model=model,
+            usage=self._usage_from_openai(data) or self._estimated_usage(prompt, content),
+        )
 
     async def check_health(self) -> Dict[str, Any]:
         key = settings.mistral_api_key or ""

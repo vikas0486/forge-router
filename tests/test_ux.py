@@ -1,8 +1,11 @@
+import json
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
+from types import SimpleNamespace
 from typer.testing import CliRunner
 from forge.cli import app
 from forge.chat import ForgeChat
+from forge_core.providers.base import ProviderResponse, UsageInfo
 
 runner = CliRunner()
 
@@ -119,3 +122,105 @@ def test_visual_content_detection():
     assert _has_visual("```svg\n<svg viewBox='0 0 10 10'></svg>\n```")
     assert _has_visual("<svg viewBox='0 0 10 10'></svg>")
     assert not _has_visual("plain markdown without diagrams")
+
+
+@pytest.mark.asyncio
+async def test_bye_prints_goodbye_once():
+    """Typing bye should exit cleanly and print the farewell once."""
+    chat = ForgeChat()
+    chat.session = SimpleNamespace(prompt_async=AsyncMock(return_value="bye"))
+
+    with patch("forge.chat.display_welcome"), \
+         patch("forge.chat.display_header"), \
+         patch("forge.chat.preview.shutdown"), \
+         patch("forge.chat.console.print") as mock_print:
+        await chat.start()
+
+    goodbye_calls = [
+        call for call in mock_print.call_args_list
+        if call.args and call.args[0] == "[info]Goodbye! 👋[/info]"
+    ]
+    assert len(goodbye_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_usage_persisted_and_reported(tmp_path):
+    """A routed chat turn should persist usage and keep provider-reported counts."""
+    usage_file = tmp_path / "session-usage.jsonl"
+    chat = ForgeChat()
+    chat.session = SimpleNamespace(prompt_async=AsyncMock(side_effect=["hello", "bye"]))
+
+    response = ProviderResponse(
+        provider="groq",
+        content="hello back",
+        model="llama",
+        usage=UsageInfo.from_counts(14, 6, 20, estimated=False),
+    )
+
+    with patch("forge.chat.SESSION_USAGE_FILE", usage_file), \
+         patch("forge.chat.display_welcome"), \
+         patch("forge.chat.display_header"), \
+         patch("forge.chat.display_response"), \
+         patch("forge.chat.preview.shutdown"), \
+         patch("forge.chat.router.route", AsyncMock(return_value=response)):
+        await chat.start()
+
+    assert len(chat._usage_entries) == 1
+    assert chat._usage_entries[0]["input_tokens"] == 14
+    assert chat._usage_entries[0]["output_tokens"] == 6
+    assert chat._usage_entries[0]["total_tokens"] == 20
+    assert chat._usage_entries[0]["estimated"] is False
+
+    rows = [json.loads(line) for line in usage_file.read_text().splitlines() if line.strip()]
+    assert len(rows) == 1
+    assert rows[0]["provider"] == "groq"
+    assert rows[0]["total_tokens"] == 20
+    assert rows[0]["estimated"] is False
+
+
+def test_usage_total_reads_persisted_log(tmp_path):
+    """`/usage total` should aggregate persisted session usage across sessions."""
+    usage_file = tmp_path / "session-usage.jsonl"
+    usage_file.write_text(
+        json.dumps({
+            "session_id": "s1", "turn": 1, "provider": "groq",
+            "input_tokens": 10, "output_tokens": 5, "total_tokens": 15, "estimated": False,
+        }) + "\n" +
+        json.dumps({
+            "session_id": "s2", "turn": 1, "provider": "claude",
+            "input_tokens": 4, "output_tokens": 6, "total_tokens": 10, "estimated": True,
+        }) + "\n"
+    )
+
+    chat = ForgeChat()
+    with patch("forge.chat.SESSION_USAGE_FILE", usage_file), \
+         patch("forge.chat.console.print") as mock_print:
+        chat._print_usage_total()
+
+    printed = "\n".join(call.args[0] for call in mock_print.call_args_list if call.args)
+    assert "Sessions        : 2" in printed
+    assert "Turns           : 2" in printed
+    assert "Total tokens    : 25" in printed
+    assert "1 reported / 1 estimated" in printed
+
+
+@pytest.mark.asyncio
+async def test_uses_alias_shows_session_usage():
+    """`/uses` should behave the same as `/usage`."""
+    chat = ForgeChat()
+    chat._usage_entries = [{
+        "turn": 1,
+        "provider": "groq",
+        "input_tokens": 10,
+        "output_tokens": 5,
+        "total_tokens": 15,
+        "estimated": False,
+        "session_id": "s1",
+    }]
+
+    with patch("forge.chat.console.print") as mock_print:
+        await chat.handle_command("/uses")
+
+    printed = "\n".join(call.args[0] for call in mock_print.call_args_list if call.args)
+    assert "Session Usage" in printed
+    assert "groq" in printed

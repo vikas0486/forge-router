@@ -4,7 +4,9 @@ import re
 import base64
 import mimetypes
 import datetime
+import json
 import subprocess
+import uuid
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Tuple
 
@@ -16,6 +18,7 @@ from prompt_toolkit.styles import Style
 from prompt_toolkit.filters import in_paste_mode
 
 from forge_core.router.engine import router, RoutingContext
+from forge_core.providers.base import UsageInfo
 from forge.ui.console import (
     console, display_welcome, display_response, ThinkingDisplay, Live,
     display_header, display_status
@@ -25,6 +28,7 @@ from forge_core.config.settings import settings
 
 HISTORY_FILE = Path.home() / ".forge_chat_history"
 MEMORY_DIR = Path.home() / ".forge" / "repo-memory"   # /repo summaries for cross-session recall
+SESSION_USAGE_FILE = Path.home() / ".forge" / "session-usage.jsonl"
 
 # Directories to skip when walking a repo
 _SKIP_DIRS = {
@@ -115,6 +119,8 @@ class ForgeChat:
 
         # File/repo context — prepended to EVERY provider call so LLM switches are transparent
         self._context_files: List[Dict[str, Any]] = []
+        self.session_id = f"forge-{datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ')}-{uuid.uuid4().hex[:8]}"
+        self._usage_entries: List[Dict[str, Any]] = []
 
         if preview_mode:
             self._preview_explicit = True
@@ -245,7 +251,6 @@ class ForgeChat:
 
         if cmd == "/exit":
             self.running = False
-            console.print("[info]Goodbye! 👋[/info]")
 
         elif cmd == "/clear":
             console.clear()
@@ -270,12 +275,14 @@ class ForgeChat:
                 ("(automatic)",        "Any real file/dir path in your message is auto-loaded"),
                 ("/status  /models",   "Provider health"),
                 ("/provider",          "Last active provider"),
+                ("/usage  /uses",      "Session token usage by turn"),
+                ("/usage total",       "All-session token totals from ~/.forge/session-usage.jsonl"),
                 ("/stats   /kb",       "Session stats + memory KB"),
                 ("/model <name|auto>", "Force or release model"),
                 ("/image <path>",      "Attach image for Vision"),
                 ("/p  /preview",       "Toggle WKWebView preview window"),
                 ("Ctrl+P",             "Toggle preview (instant, no typing)"),
-                ("/exit",              "Exit"),
+                ("/exit",              "Exit (also: exit quit bye q)"),
             ]
             for cmd_str, desc in rows:
                 console.print(f"  [cyan]{cmd_str:<24}[/cyan] {desc}")
@@ -310,6 +317,12 @@ class ForgeChat:
         elif cmd == "/provider":
             console.print(f"[info]Last provider: [bold]{self.last_provider}[/bold]  model: {self.last_model}[/info]")
 
+        elif cmd in ("/usage", "/uses"):
+            if len(parts) > 1 and parts[1].lower() == "total":
+                self._print_usage_total()
+            else:
+                self._print_session_usage()
+
         elif cmd in ("/preview", "/p"):
             self._do_toggle_preview(show_status=True)
 
@@ -318,12 +331,17 @@ class ForgeChat:
             from forge_core.router.observability import observability
             kb = knowledge_base.stats()
             obs = observability.summary()
+            usage = self._usage_summary(self._usage_entries)
             console.print(f"\n[bold]Session[/bold]")
             ctx_size = sum(len(f["content"]) for f in self._context_files)
             console.print(f"  Messages        : {self.msg_count}")
             console.print(f"  Context turns   : {len(self._session_history)}")
             console.print(f"  Loaded files    : {len(self._context_files)} ({ctx_size:,} chars)")
             console.print(f"  Last provider   : {self.last_provider} ({self.last_model})")
+            console.print(
+                f"  Tokens          : {usage['total_tokens']:,} "
+                f"(in {usage['input_tokens']:,} / out {usage['output_tokens']:,})"
+            )
             console.print(f"  Preview         : {'ON' if preview.active and preview.window_alive else 'OFF'}")
             console.print(f"\n[bold]Memory KB[/bold]")
             console.print(f"  Interactions    : {kb['total_interactions']}")
@@ -527,6 +545,7 @@ class ForgeChat:
                 self.last_provider = response.provider
                 self.last_model = response.model or response.provider
                 self.attachments = []
+                self._record_usage(user_input, response, ctx.intent)
 
                 # Persist the updated conversation history for next turn
                 self._update_history(ctx)
@@ -564,6 +583,103 @@ class ForgeChat:
         ctx.history = list(self._session_history)
         ctx.system_prefix = self._build_file_prefix()
         return ctx
+
+    def _record_usage(self, prompt: str, response: Any, intent: str):
+        usage = response.usage or UsageInfo.from_counts(
+            input_tokens=max(1, len(prompt) // 4) if prompt.strip() else 0,
+            output_tokens=max(1, len(response.content) // 4) if response.content.strip() else 0,
+            estimated=True,
+        )
+        entry = {
+            "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "session_id": self.session_id,
+            "turn": self.msg_count,
+            "intent": intent,
+            "provider": response.provider,
+            "model": response.model or response.provider,
+            "input_tokens": usage.input_tokens,
+            "output_tokens": usage.output_tokens,
+            "total_tokens": usage.total_tokens,
+            "estimated": usage.estimated,
+        }
+        self._usage_entries.append(entry)
+        self._append_usage_log(entry)
+
+    def _append_usage_log(self, entry: Dict[str, Any]):
+        try:
+            SESSION_USAGE_FILE.parent.mkdir(parents=True, exist_ok=True)
+            with SESSION_USAGE_FILE.open("a", encoding="utf-8") as f:
+                f.write(json.dumps(entry, ensure_ascii=True) + "\n")
+        except Exception:
+            pass
+
+    def _usage_summary(self, entries: List[Dict[str, Any]]) -> Dict[str, int]:
+        sessions = {entry.get("session_id") for entry in entries if entry.get("session_id")}
+        return {
+            "turns": len(entries),
+            "sessions": len(sessions),
+            "input_tokens": sum(int(entry.get("input_tokens", 0)) for entry in entries),
+            "output_tokens": sum(int(entry.get("output_tokens", 0)) for entry in entries),
+            "total_tokens": sum(int(entry.get("total_tokens", 0)) for entry in entries),
+            "estimated_turns": sum(1 for entry in entries if entry.get("estimated")),
+            "reported_turns": sum(1 for entry in entries if not entry.get("estimated")),
+        }
+
+    def _read_usage_log(self) -> List[Dict[str, Any]]:
+        if not SESSION_USAGE_FILE.exists():
+            return []
+        rows: List[Dict[str, Any]] = []
+        try:
+            with SESSION_USAGE_FILE.open("r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        row = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if isinstance(row, dict):
+                        rows.append(row)
+        except Exception:
+            return []
+        return rows
+
+    def _print_session_usage(self):
+        if not self._usage_entries:
+            console.print("[info]No usage yet in this session.[/info]")
+            return
+        console.print(f"\n[bold]Session Usage[/bold] [dim]({self.session_id})[/dim]")
+        console.print(f"  {'turn':>4} {'provider':12} {'in':>8} {'out':>8} {'total':>8} {'mode':>10}")
+        for entry in self._usage_entries[-10:]:
+            mode = "estimate" if entry["estimated"] else "reported"
+            console.print(
+                f"  {entry['turn']:>4} {entry['provider'][:12]:12} {entry['input_tokens']:>8} "
+                f"{entry['output_tokens']:>8} {entry['total_tokens']:>8} {mode:>10}"
+            )
+        summary = self._usage_summary(self._usage_entries)
+        console.print(
+            f"  {'sum':>4} {'session':12} {summary['input_tokens']:>8} {summary['output_tokens']:>8} "
+            f"{summary['total_tokens']:>8} {'':>10}"
+        )
+        console.print(
+            f"[dim]{summary['reported_turns']} provider-reported turns, "
+            f"{summary['estimated_turns']} estimated fallback turns[/dim]\n"
+        )
+
+    def _print_usage_total(self):
+        rows = self._read_usage_log()
+        if not rows:
+            console.print(f"[info]No persisted usage yet at {SESSION_USAGE_FILE}.[/info]")
+            return
+        summary = self._usage_summary(rows)
+        console.print(f"\n[bold]All Session Usage[/bold] [dim]({SESSION_USAGE_FILE})[/dim]")
+        console.print(f"  Sessions        : {summary['sessions']}")
+        console.print(f"  Turns           : {summary['turns']}")
+        console.print(f"  Input tokens    : {summary['input_tokens']:,}")
+        console.print(f"  Output tokens   : {summary['output_tokens']:,}")
+        console.print(f"  Total tokens    : {summary['total_tokens']:,}")
+        console.print(f"  Provider counts : {summary['reported_turns']} reported / {summary['estimated_turns']} estimated\n")
 
     def _update_history(self, ctx: RoutingContext):
         """Capture the updated history after a successful route() call."""

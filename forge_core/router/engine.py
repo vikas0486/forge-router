@@ -102,6 +102,17 @@ def _diagram_prompt(prompt: str) -> str:
     )
 
 
+def _svg_fallback_prompt(prompt: str) -> str:
+    return (
+        "You do not have a native bitmap image-generation tool for this turn.\n"
+        "Return only a single fenced ```svg block that visually illustrates the request.\n"
+        "Do not explain the image. Do not output markdown outside the svg fence.\n"
+        "Use an original SVG scene with shapes, gradients, and labels only when necessary.\n"
+        "Aim for a visually rich result that renders directly in a browser.\n\n"
+        f"{prompt}"
+    )
+
+
 def _sanitize_mermaid_body(body: str) -> str:
     def _clean_label(label: str) -> str:
         label = label.strip().replace("—", "-").replace("–", "-")
@@ -329,6 +340,9 @@ class RouterEngine:
 
         ctx = context or RoutingContext(prompt)
         intent = ctx.intent
+        image_prompt = intent == "visual" and _is_visual_image_prompt(prompt)
+        preferred_override_from: Optional[str] = None
+        last_error: Optional[str] = None
         if timeout == 30:
             timeout = _INTENT_TIMEOUT.get(intent, 30)
         logger.info(f"[router] intent={intent} preferred={preferred} timeout={timeout}s")
@@ -352,8 +366,12 @@ class RouterEngine:
         def _prompt_for(p: BaseProvider) -> str:
             """Assemble the prompt fitted to this provider's input budget."""
             prompt_for_model = prompt
-            if intent == "visual" and not _is_visual_image_prompt(prompt) and p.name != "openai_image":
-                prompt_for_model = _diagram_prompt(prompt)
+            if intent == "visual":
+                if _is_visual_image_prompt(prompt):
+                    if p.name != "openai_image":
+                        prompt_for_model = _svg_fallback_prompt(prompt)
+                elif p.name != "openai_image":
+                    prompt_for_model = _diagram_prompt(prompt)
             if not ctx.system_prefix:
                 return prompt_for_model if base_prompt == prompt else base_prompt.replace(prompt, prompt_for_model, 1)
             adjusted_base = prompt_for_model if base_prompt == prompt else base_prompt.replace(prompt, prompt_for_model, 1)
@@ -402,9 +420,25 @@ class RouterEngine:
             _progress(preferred, f"Unknown provider '{preferred}' — falling back to auto", failed=True)
             preferred = None
 
+        if image_prompt and preferred and preferred != "openai_image":
+            logger.info(f"[router] overriding preferred={preferred} for image-generation prompt")
+            preferred_override_from = preferred
+            _progress(
+                preferred,
+                f"Image-generation prompt detected — trying openai_image first, then fallback visuals if needed (requested {preferred})",
+                failed=True,
+            )
+            preferred = "openai_image"
+
         if preferred and preferred in self._by_name:
             p = self._by_name[preferred]
-            _progress(p.name, "Using preferred provider...")
+            if preferred_override_from:
+                _progress(
+                    p.name,
+                    f"Image-generation prompt detected — using {p.name} first; fallback will continue to SVG-capable providers if needed",
+                )
+            else:
+                _progress(p.name, "Using preferred provider...")
             try:
                 t0 = time.time()
                 resp = await asyncio.wait_for(
@@ -418,9 +452,11 @@ class RouterEngine:
                 return resp
             except asyncio.TimeoutError:
                 elapsed = round(time.time() - t0)
+                last_error = f"{p.name} timed out after {elapsed}s"
                 _progress(p.name, f"Preferred timed out ({elapsed}s > {WALL_CLOCK_TIMEOUT}s) — falling back", failed=True)
                 logger.warning(f"[router] preferred {preferred} wall-clock timeout after {elapsed}s")
             except Exception as e:
+                last_error = f"{p.name} failed: {e}"
                 _progress(p.name, f"Preferred failed: {e}", failed=True)
                 logger.warning(f"[router] preferred {preferred} failed: {e}")
 
@@ -452,13 +488,21 @@ class RouterEngine:
                 return resp
             except asyncio.TimeoutError:
                 elapsed = round(time.time() - t0)
+                last_error = f"{p.name} timed out after {elapsed}s"
                 msg = f"Timed out ({elapsed}s > {WALL_CLOCK_TIMEOUT}s) — switching"
                 _progress(p.name, msg, failed=True)
                 logger.warning(f"[router] {p.name} wall-clock timeout after {elapsed}s")
             except Exception as e:
+                last_error = f"{p.name} failed: {e}"
                 _progress(p.name, f"Failed: {e}", failed=True)
                 logger.error(f"[router] {p.name} failed: {e}")
 
+        if image_prompt:
+            detail = last_error or "no image-capable providers available"
+            raise ValueError(
+                "Image generation and visual fallback both failed: "
+                f"{detail}. Tried: {ctx.tried}"
+            )
         raise ValueError(f"All providers failed for intent={intent}. Tried: {ctx.tried}")
 
     async def get_status(self) -> Dict[str, Dict[str, Any]]:

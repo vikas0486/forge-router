@@ -146,6 +146,75 @@ async def test_visual_image_prompt_prefers_image_provider():
 
 
 @pytest.mark.asyncio
+async def test_visual_image_prompt_falls_back_to_svg_provider_on_failure():
+    router = RouterEngine()
+
+    image_p = MagicMock()
+    image_p.name = "openai_image"
+    image_p.priority = 1
+    image_p.max_context_chars = 40_000
+    image_p.check_health = AsyncMock(return_value={"ok": True})
+    image_p.generate = AsyncMock(side_effect=ValueError("billing_hard_limit_reached"))
+
+    claude_p = MagicMock()
+    claude_p.name = "claude"
+    claude_p.priority = 2
+    claude_p.max_context_chars = 200_000
+    claude_p.check_health = AsyncMock(return_value={"ok": True})
+    claude_p.generate = AsyncMock(return_value=ProviderResponse("claude", "```svg\n<svg viewBox='0 0 10 10'></svg>\n```", "claude-code"))
+
+    router.providers = [claude_p, image_p]
+
+    response = await router.route("generate a photo of a waterfall in the hills")
+    assert response.provider == "claude"
+    assert response.content.startswith("```svg")
+    image_p.generate.assert_called_once()
+    claude_p.generate.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_visual_image_prompt_overrides_incompatible_preferred_provider():
+    router = RouterEngine()
+    events = []
+
+    image_p = MagicMock()
+    image_p.name = "openai_image"
+    image_p.priority = 1
+    image_p.max_context_chars = 40_000
+    image_p.check_health = AsyncMock(return_value={"ok": True})
+    image_p.generate = AsyncMock(return_value=ProviderResponse("openai_image", "![img](/generated/x.png)", "gpt-image-1"))
+
+    codex_p = MagicMock()
+    codex_p.name = "codex"
+    codex_p.priority = 2
+    codex_p.max_context_chars = 300_000
+    codex_p.check_health = AsyncMock(return_value={"ok": True})
+    codex_p.generate = AsyncMock(return_value=ProviderResponse("codex", "text only", "gpt-5.1-codex-mini"))
+
+    router.providers = [codex_p, image_p]
+
+    def on_progress(**kwargs):
+        events.append(kwargs)
+
+    response = await router.route(
+        "generate a photo of a waterfall in the hills",
+        preferred="codex",
+        on_progress=on_progress,
+    )
+    assert response.provider == "openai_image"
+    image_p.generate.assert_called_once()
+    codex_p.generate.assert_not_called()
+    assert any(
+        "trying openai_image first" in e.get("status", "").lower()
+        for e in events
+    )
+    assert any(
+        "using openai_image first" in e.get("status", "").lower()
+        for e in events
+    )
+
+
+@pytest.mark.asyncio
 async def test_visual_diagram_prompt_normalizes_mermaid():
     router = RouterEngine()
 

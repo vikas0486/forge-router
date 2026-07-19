@@ -70,7 +70,13 @@ class OpenRouterProvider(BaseProvider):
         data = resp.json()
         content = data["choices"][0]["message"]["content"]
         used_model = data.get("model", model)
-        return ProviderResponse(provider=self.name, content=self._validate_content(content), model=used_model)
+        content = self._validate_content(content)
+        return ProviderResponse(
+            provider=self.name,
+            content=content,
+            model=used_model,
+            usage=self._usage_from_openai(data) or self._estimated_usage(prompt, content),
+        )
 
     async def check_health(self) -> Dict[str, Any]:
         key = settings.openrouter_api_key or ""

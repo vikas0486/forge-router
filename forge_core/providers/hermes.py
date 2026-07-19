@@ -67,7 +67,13 @@ class HermesProvider(BaseProvider):
             raise ValueError(f"Hermes/Groq error ({resp.status_code}): {resp.text[:200]}")
         data = resp.json()
         content = data["choices"][0]["message"]["content"]
-        return ProviderResponse(provider=self.name, content=self._validate_content(content), model=f"hermes@{self._groq_model}")
+        content = self._validate_content(content)
+        return ProviderResponse(
+            provider=self.name,
+            content=content,
+            model=f"hermes@{self._groq_model}",
+            usage=self._usage_from_openai(data) or self._estimated_usage(prompt, content),
+        )
 
     async def _generate_ollama(self, prompt: str, model: str, timeout: int) -> ProviderResponse:
         # Local models need more headroom — 6B+ models can take 60-90s on first load
@@ -86,8 +92,14 @@ class HermesProvider(BaseProvider):
             )
         if resp.status_code != 200:
             raise ValueError(f"Hermes/Ollama error ({resp.status_code}): {resp.text[:200]}")
-        content = resp.json()["message"]["content"]
-        return ProviderResponse(provider=self.name, content=self._validate_content(content), model=f"hermes@{model}")
+        data = resp.json()
+        content = self._validate_content(data["message"]["content"])
+        return ProviderResponse(
+            provider=self.name,
+            content=content,
+            model=f"hermes@{model}",
+            usage=self._usage_from_ollama(data) or self._estimated_usage(prompt, content),
+        )
 
     async def check_health(self) -> Dict[str, Any]:
         if settings.groq_api_key:

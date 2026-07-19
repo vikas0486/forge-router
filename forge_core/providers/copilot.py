@@ -30,7 +30,11 @@ class CopilotProvider(BaseProvider):
 
             content = stdout.decode().strip()
             content = self._validate_content(content)
-            return ProviderResponse(provider=self.name, content=content)
+            return ProviderResponse(
+                provider=self.name,
+                content=content,
+                usage=self._estimated_usage(prompt, content),
+            )
         except Exception as e:
             logger.error(f"Copilot error: {str(e)}")
             raise

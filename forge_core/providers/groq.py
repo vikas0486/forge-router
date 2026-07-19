@@ -64,7 +64,12 @@ class GroqProvider(BaseProvider):
             data = response.json()
             content = data["choices"][0]["message"]["content"]
             content = self._validate_content(content)   # empty content → fallback to next provider
-            return ProviderResponse(provider=self.name, content=content, model=data.get("model"))
+            return ProviderResponse(
+                provider=self.name,
+                content=content,
+                model=data.get("model"),
+                usage=self._usage_from_openai(data) or self._estimated_usage(prompt, content),
+            )
 
     async def check_health(self) -> Dict[str, Any]:
         if not settings.groq_api_key:

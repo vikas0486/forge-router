@@ -35,7 +35,8 @@ All under `~/.forge/`: `kb/` (FAISS+SQLite), `generated/` (image output), `repo-
 - Adaptive context fitting: each provider has `max_context_chars` (groq/hermes 32K, ollama 6K, claude 400K...); router relevance-trims file/repo context per provider (`shrink_context` in engine.py) — fixes Groq free-tier TPM 413s on big /repo loads
 - Visual routing: `visual` intent separates image/photo prompts from diagram prompts; image prompts prefer `openai_image`, diagrams prefer `claude`/`codex`/`openai`
 - Preview: auto-opens for diagrams/media, has a `Copy` button, renders Mermaid directly, Graphviz via Viz.js, PlantUML/D2 via Kroki, and serves generated images from `~/.forge/generated/`
+- Session usage tracking: `forge chat` now records per-turn token usage, prefers provider-reported counts when APIs expose them, falls back to estimates for CLI/local providers, persists rows to `~/.forge/session-usage.jsonl`, and exposes `/usage` plus `/usage total`
 
 ## Status
-v0.5.1 — Phase 1 gateway MVP plus visual stack upgrades. `forge_core` extracted (gateway-ready engine). `forge_gateway/`: FastAPI Anthropic-compatible `POST /v1/messages` (non-streaming) + virtual keys (SHA-256, per-key model allow-lists) + usage metering to `~/.forge/gateway.db`. Added `visual` intent, `openai_image` (`gpt-image-1`) provider, Mermaid normalization/sanitization, and richer preview rendering/copy support. 43 tests passing.
-Next: streaming (SSE), `/v1/chat/completions` (OpenAI), `/v1/models`, real token counts.
+v0.5.1+local — Phase 1 gateway MVP plus visual stack upgrades and token accounting. `forge chat` now has per-session usage tracking and a persisted `~/.forge/session-usage.jsonl` ledger. `forge_gateway/` now uses provider-reported token counts when available and falls back to the old estimate when not.
+Next: streaming (SSE), `/v1/chat/completions` (OpenAI), `/v1/models`, budgets/quotas, and richer usage dashboards.

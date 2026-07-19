@@ -66,7 +66,13 @@ class ClaudeProvider(BaseProvider):
             raise ValueError(f"claude CLI exited {proc.returncode}: {stderr.decode()[:200]}")
 
         content = stdout.decode().strip()
-        return ProviderResponse(provider=self.name, content=self._validate_content(content), model="claude-code")
+        content = self._validate_content(content)
+        return ProviderResponse(
+            provider=self.name,
+            content=content,
+            model="claude-code",
+            usage=self._estimated_usage(prompt, content),
+        )
 
     async def _generate_api(self, prompt: str, timeout: int) -> ProviderResponse:
         headers = {
@@ -85,7 +91,12 @@ class ClaudeProvider(BaseProvider):
                 raise ValueError(f"Claude API error ({response.status_code}): {response.text}")
             data = response.json()
             content = self._validate_content(data["content"][0]["text"])
-            return ProviderResponse(provider=self.name, content=content, model=data.get("model"))
+            return ProviderResponse(
+                provider=self.name,
+                content=content,
+                model=data.get("model"),
+                usage=self._usage_from_anthropic(data) or self._estimated_usage(prompt, content),
+            )
 
     async def check_health(self) -> Dict[str, Any]:
         if self._cli_available():
