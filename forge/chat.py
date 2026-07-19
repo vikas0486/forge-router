@@ -58,9 +58,9 @@ _RUN_MAX_OUTPUT = 12_000
 # Matches: mermaid/plantuml/graphviz code blocks, markdown images,
 # HTML img tags, and direct media file links.
 _VISUAL_RE = re.compile(
-    r'```mermaid|```plantuml|```dot\b|```d2\b'
+    r'```mermaid|```plantuml|```dot\b|```graphviz\b|```d2\b|```svg\b'
     r'|!\[.{0,200}\]\('
-    r'|<img\s'
+    r'|<img\s|<svg\b'
     r'|\[.{0,100}\]\(.{0,200}\.(png|jpg|jpeg|gif|svg|webp|mp4|webm|mp3|wav|ogg)\)',
     re.IGNORECASE,
 )
@@ -75,7 +75,8 @@ def _has_visual(text: str) -> bool:
 _VISUAL_PROMPT_RE = re.compile(
     r'\b(draw|sketch|paint|art|ascii|diagram|chart|graph|flowchart|mermaid|svg'
     r'|image|photo|picture|pic|video|animation|animate|visuali[sz]e|render'
-    r'|plot|wireframe|mockup|logo|icon|banner|infographic|illustration)\b',
+    r'|plot|wireframe|mockup|logo|icon|banner|infographic|illustration'
+    r'|architecture|sequence|uml|plantuml|graphviz|dot|d2)\b',
     re.IGNORECASE,
 )
 

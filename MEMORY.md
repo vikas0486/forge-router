@@ -1,16 +1,16 @@
 # Forge Router — Project Notes
 
 ## Structure
-- `forge_core/`: embeddable engine — `router/`, `providers/` (11 active), `memory/` (FAISS+SQLite RAG), `config/`. Zero CLI/UI imports (enforced by test). `from forge_core import router, RoutingContext`
+- `forge_core/`: embeddable engine — `router/`, `providers/` (12 active), `memory/` (FAISS+SQLite RAG), `config/`. Zero CLI/UI imports (enforced by test). `from forge_core import router, RoutingContext`
 - `forge/`: CLI client — `cli.py` (Typer), `chat.py` (REPL + local-file bridge), `ui/` (Rich, preview)
-- `tests/`: pytest suite (21 tests)
+- `tests/`: pytest suite (43 tests)
 - `docs/ENTERPRISE-GATEWAY-EVALUATION.md`: gateway evolution architecture + roadmap
 
 ## Credentials
 Single source: `/Users/vikash/Documents/Projects/credentials/.env` (never committed; repo is PUBLIC). antigravity/ollama need no keys; copilot uses CLI OAuth.
 
 ## Runtime Data
-All under `~/.forge/`: `kb/` (FAISS+SQLite), `repo-memory/`, `logs/observability.jsonl`, preview files. Absolute paths — never written to repo or CWD.
+All under `~/.forge/`: `kb/` (FAISS+SQLite), `generated/` (image output), `repo-memory/`, `logs/observability.jsonl`, preview files. Absolute paths — never written to repo or CWD.
 
 ## Active Providers (priority order)
 1. antigravity (`agy` CLI — Gemini Flash, no key)
@@ -20,7 +20,8 @@ All under `~/.forge/`: `kb/` (FAISS+SQLite), `repo-memory/`, `logs/observability
 5. codex (codex-mini-latest via /v1/responses)
 6. openrouter (intent-routed: R1 / Qwen-coder / LLaMA-70B) · copilot (GitHub CLI)
 7. openai (gpt-4o)
-8. ollama (local CPU: llama3.1:8b, qwen2.5-coder:7b, nous-hermes2)
+8. openai_image (gpt-image-1)
+9. ollama (local CPU: llama3.1:8b, qwen2.5-coder:7b, nous-hermes2)
 
 ## Key Rules
 - Wall-clock timeout: 60s per provider — router switches on breach regardless of intent timeout
@@ -32,7 +33,9 @@ All under `~/.forge/`: `kb/` (FAISS+SQLite), `repo-memory/`, `logs/observability
 ## Key Features
 - Local-file bridge: any real file/dir path typed in a chat prompt is auto-read locally and injected into context — cloud LLMs (Groq etc.) "see" local files through forge (`_auto_load_paths` in chat.py)
 - Adaptive context fitting: each provider has `max_context_chars` (groq/hermes 32K, ollama 6K, claude 400K...); router relevance-trims file/repo context per provider (`shrink_context` in engine.py) — fixes Groq free-tier TPM 413s on big /repo loads
+- Visual routing: `visual` intent separates image/photo prompts from diagram prompts; image prompts prefer `openai_image`, diagrams prefer `claude`/`codex`/`openai`
+- Preview: auto-opens for diagrams/media, has a `Copy` button, renders Mermaid directly, Graphviz via Viz.js, PlantUML/D2 via Kroki, and serves generated images from `~/.forge/generated/`
 
 ## Status
-v0.4.4 — Phase 0 complete + Phase 1 gateway MVP underway. `forge_core` extracted (gateway-ready engine). `forge_gateway/`: FastAPI Anthropic-compatible `POST /v1/messages` (non-streaming) + virtual keys (SHA-256, per-key model allow-lists) + usage metering to `~/.forge/gateway.db`. CLI: `forge gateway serve/keys/top`. 34 tests (was 27; +7 gateway). Deps: added fastapi + uvicorn direct. Requests route through the intent router to cheap providers, NOT to Anthropic.
+v0.5.1 — Phase 1 gateway MVP plus visual stack upgrades. `forge_core` extracted (gateway-ready engine). `forge_gateway/`: FastAPI Anthropic-compatible `POST /v1/messages` (non-streaming) + virtual keys (SHA-256, per-key model allow-lists) + usage metering to `~/.forge/gateway.db`. Added `visual` intent, `openai_image` (`gpt-image-1`) provider, Mermaid normalization/sanitization, and richer preview rendering/copy support. 43 tests passing.
 Next: streaming (SSE), `/v1/chat/completions` (OpenAI), `/v1/models`, real token counts.

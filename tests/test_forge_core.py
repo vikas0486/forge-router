@@ -6,7 +6,7 @@ import sys
 def test_forge_core_public_api():
     from forge_core import router, RouterEngine, RoutingContext, settings, ProviderResponse
     assert isinstance(router, RouterEngine)
-    assert len(router.providers) == 11
+    assert len(router.providers) == 12
     ctx = router.new_context("write a function")
     assert isinstance(ctx, RoutingContext)
     assert ctx.intent == "code"

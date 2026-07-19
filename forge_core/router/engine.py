@@ -15,6 +15,7 @@ from forge_core.providers.claude import ClaudeProvider
 from forge_core.providers.openrouter import OpenRouterProvider
 from forge_core.providers.copilot import CopilotProvider
 from forge_core.providers.openai import OpenAIProvider
+from forge_core.providers.openai_image import OpenAIImageProvider
 from forge_core.providers.codex import CodexProvider
 from forge_core.providers.ollama import OllamaProvider
 
@@ -26,6 +27,7 @@ _INTENT_TIMEOUT: Dict[str, int] = {
     "summarization": 20,
     "code":          30,
     "reasoning":     45,
+    "visual":        45,
     "agentic":       60,
 }
 
@@ -47,12 +49,32 @@ _AGENT_PAT = re.compile(
     r'\b(search|browse|fetch|plan|execute|tool|agent|pipeline|workflow|automate)\b',
     re.I
 )
+_VISUAL_PAT = re.compile(
+    r'\b(draw|sketch|paint|art|ascii|diagram|chart|graph|flowchart|mermaid|svg|image|photo|picture|pic'
+    r'|render|wireframe|mockup|logo|icon|banner|infographic|illustration|architecture|sequence|uml'
+    r'|plantuml|graphviz|dot|d2)\b',
+    re.I
+)
+_VISUAL_IMAGE_PAT = re.compile(
+    r'\b(image|photo|picture|pic|portrait|wallpaper|illustration|logo|icon|banner|cover art|render)\b',
+    re.I
+)
+_MERMAID_START_PAT = re.compile(
+    r'^\s*(graph|flowchart|sequenceDiagram|classDiagram|erDiagram|stateDiagram(?:-v2)?|journey|gantt|pie|mindmap|timeline)\b',
+    re.I,
+)
+_MERMAID_FENCE_PAT = re.compile(r'```mermaid\s*\r?\n([\s\S]*?)```', re.I)
+_SIMPLE_EDGE_PAT = re.compile(r'^(?P<indent>\s*)(?P<left>.+?)\s*(?P<arrow>-->|---|-.->|==>)\s*(?P<right>.+?)\s*$')
+_SUBGRAPH_LABEL_PAT = re.compile(r'^(?P<indent>\s*subgraph\s+)(?P<ident>[A-Za-z0-9_]+)\[(?P<label>.+?)\]\s*$', re.I)
+_NODE_LABEL_PAT = re.compile(r'(?P<ident>\b[A-Za-z0-9_]+\b)\[(?P<label>[^\[\]\"]+)\]')
 _SUMMARY_PAT = re.compile(
     r'\b(summarize|summary|tldr|brief|condense|extract|key points)\b',
     re.I
 )
 
 def classify_intent(prompt: str) -> str:
+    if _VISUAL_PAT.search(prompt):
+        return "visual"
     if _CODE_PAT.search(prompt):
         return "code"
     if _REASON_PAT.search(prompt):
@@ -62,6 +84,90 @@ def classify_intent(prompt: str) -> str:
     if _SUMMARY_PAT.search(prompt):
         return "summarization"
     return "chat"
+
+
+def _is_visual_image_prompt(prompt: str) -> bool:
+    return bool(_VISUAL_IMAGE_PAT.search(prompt))
+
+
+def _diagram_prompt(prompt: str) -> str:
+    return (
+        "Return only a single fenced ```mermaid block.\n"
+        "Use Mermaid v10 compatible syntax.\n"
+        "Do not include explanation before or after the diagram.\n"
+        "Prefer flowchart TD for architecture diagrams.\n"
+        "Keep labels short and avoid exotic syntax.\n"
+        "Use one edge per line. Do not use combined edges like A --> B & C.\n\n"
+        f"{prompt}"
+    )
+
+
+def _sanitize_mermaid_body(body: str) -> str:
+    def _clean_label(label: str) -> str:
+        label = label.strip().replace("—", "-").replace("–", "-")
+        while len(label) >= 2 and ((label[0] == "'" and label[-1] == "'") or (label[0] == '"' and label[-1] == '"')):
+            label = label[1:-1].strip()
+        return label.replace('"', "'")
+
+    out = []
+    for raw_line in body.replace("\r\n", "\n").split("\n"):
+        line = raw_line.rstrip().replace("—", "-").replace("–", "-")
+        sub = _SUBGRAPH_LABEL_PAT.match(line)
+        if sub:
+            label = _clean_label(sub.group("label"))
+            line = f'{sub.group("indent")}{sub.group("ident")}["{label}"]'
+        else:
+            def _quote_node_label(match: re.Match[str]) -> str:
+                label = _clean_label(match.group("label"))
+                if label.startswith('"') and label.endswith('"'):
+                    return match.group(0)
+                return f'{match.group("ident")}["{label}"]'
+            line = _NODE_LABEL_PAT.sub(_quote_node_label, line)
+        m = _SIMPLE_EDGE_PAT.match(line)
+        if not m:
+            out.append(line)
+            continue
+
+        indent = m.group("indent")
+        left = m.group("left").strip()
+        arrow = m.group("arrow")
+        right = m.group("right").strip()
+        left_parts = [p.strip() for p in left.split(" & ") if p.strip()]
+        right_parts = [p.strip() for p in right.split(" & ") if p.strip()]
+
+        if len(left_parts) == 1 and len(right_parts) == 1:
+            out.append(line)
+            continue
+
+        for l in left_parts:
+            for r in right_parts:
+                out.append(f"{indent}{l} {arrow} {r}")
+    return "\n".join(out).strip()
+
+
+def _normalize_mermaid_output(content: str) -> str:
+    text = content.strip()
+    m = _MERMAID_FENCE_PAT.search(text)
+    if m:
+        body = _sanitize_mermaid_body(m.group(1).strip())
+        return f"```mermaid\n{body}\n```"
+
+    lines = [line.rstrip() for line in text.replace("\r\n", "\n").split("\n")]
+    start = None
+    for i, line in enumerate(lines):
+        if _MERMAID_START_PAT.match(line):
+            start = i
+            break
+    if start is None:
+        return content
+
+    body_lines = lines[start:]
+
+    if not any(line.strip() for line in body_lines):
+        return content
+
+    body = _sanitize_mermaid_body("\n".join(body_lines).strip())
+    return f"```mermaid\n{body}\n```"
 
 # ── Provider Metadata ────────────────────────────────────────────────────────
 
@@ -178,6 +284,7 @@ class RouterEngine:
             OpenRouterProvider(),    # DeepSeek-R1, Qwen-32B-Coder, LLaMA-70B (priority 5)
             CopilotProvider(),       # GitHub Copilot CLI (priority 5)
             OpenAIProvider(),        # gpt-4o (priority 6)
+            OpenAIImageProvider(),   # gpt-image-1 image generation (visual intent)
             CodexProvider(),         # codex-mini-latest (priority 4)
             OllamaProvider(),        # local CPU fallback (priority 7)
         ]
@@ -191,8 +298,13 @@ class RouterEngine:
         self._all_providers = providers
         self._by_name: Dict[str, BaseProvider] = {p.name: p for p in self._all_providers}
 
-    def _ordered_for_intent(self, intent: str) -> List[BaseProvider]:
-        order = _INTENT_ROUTING.get(intent, [p.name for p in self._all_providers])
+    def _visual_order(self, prompt: str) -> List[str]:
+        if _VISUAL_IMAGE_PAT.search(prompt):
+            return ["openai_image", "claude", "openai", "codex", "openrouter", "mistral", "ollama"]
+        return ["claude", "codex", "openai", "openrouter", "mistral", "groq", "cerebras", "ollama"]
+
+    def _ordered_for_intent(self, intent: str, prompt: str = "") -> List[BaseProvider]:
+        order = self._visual_order(prompt) if intent == "visual" else _INTENT_ROUTING.get(intent, [p.name for p in self._all_providers])
         providers = []
         seen = set()
         for name in order:
@@ -239,9 +351,13 @@ class RouterEngine:
 
         def _prompt_for(p: BaseProvider) -> str:
             """Assemble the prompt fitted to this provider's input budget."""
+            prompt_for_model = prompt
+            if intent == "visual" and not _is_visual_image_prompt(prompt) and p.name != "openai_image":
+                prompt_for_model = _diagram_prompt(prompt)
             if not ctx.system_prefix:
-                return base_prompt
-            prefix_budget = p.max_context_chars - len(base_prompt) - 16
+                return prompt_for_model if base_prompt == prompt else base_prompt.replace(prompt, prompt_for_model, 1)
+            adjusted_base = prompt_for_model if base_prompt == prompt else base_prompt.replace(prompt, prompt_for_model, 1)
+            prefix_budget = p.max_context_chars - len(adjusted_base) - 16
             prefix = shrink_context(ctx.system_prefix, prompt, prefix_budget)
             if len(prefix) < len(ctx.system_prefix):
                 logger.info(
@@ -249,8 +365,8 @@ class RouterEngine:
                     f"→ {len(prefix):,} (budget {p.max_context_chars:,})"
                 )
             if not prefix:
-                return base_prompt
-            return f"{prefix}\n\n---\n\n{base_prompt}"
+                return adjusted_base
+            return f"{prefix}\n\n---\n\n{adjusted_base}"
 
         def _progress(name: str, status: str, failed: bool = False):
             if on_progress:
@@ -295,6 +411,8 @@ class RouterEngine:
                     p.generate(_prompt_for(p), timeout=timeout, image=image),
                     timeout=WALL_CLOCK_TIMEOUT,
                 )
+                if intent == "visual" and not _is_visual_image_prompt(prompt):
+                    resp.content = _normalize_mermaid_output(resp.content)
                 ctx.add_assistant_message(p.name, resp.content)
                 _fire_score(resp, t0)
                 return resp
@@ -307,7 +425,7 @@ class RouterEngine:
                 logger.warning(f"[router] preferred {preferred} failed: {e}")
 
         # 2. Intent-ordered fallback chain (same-category first)
-        for p in self._ordered_for_intent(intent):
+        for p in self._ordered_for_intent(intent, prompt):
             if p.name in ctx.tried:
                 continue
             ctx.tried.append(p.name)
@@ -326,6 +444,8 @@ class RouterEngine:
                     p.generate(_prompt_for(p), timeout=timeout, image=image),
                     timeout=WALL_CLOCK_TIMEOUT,
                 )
+                if intent == "visual" and not _is_visual_image_prompt(prompt):
+                    resp.content = _normalize_mermaid_output(resp.content)
                 ctx.add_assistant_message(p.name, resp.content)
                 logger.info(f"[router] success: {p.name} (intent={intent})")
                 _fire_score(resp, t0)

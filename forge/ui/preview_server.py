@@ -14,6 +14,7 @@ Usage:
 """
 import json
 import logging
+import mimetypes
 import subprocess
 import sys
 import threading
@@ -21,6 +22,7 @@ import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import Optional
+from urllib.parse import unquote, urlparse
 
 logger = logging.getLogger("forge.ui.preview")
 
@@ -28,6 +30,7 @@ PREVIEW_PORT = 7654
 RESULTS_DIR = Path.home() / ".forge"
 RESULTS_MD = RESULTS_DIR / "results.md"
 STATE_FILE = RESULTS_DIR / "preview_state.json"  # current content + metadata
+GENERATED_DIR = RESULTS_DIR / "generated"
 
 _HTML = r"""<!DOCTYPE html>
 <html lang="en">
@@ -38,6 +41,9 @@ _HTML = r"""<!DOCTYPE html>
 
 <!-- Mermaid -->
 <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<!-- Viz.js for Graphviz/DOT -->
+<script src="https://cdn.jsdelivr.net/npm/viz.js@2.1.2/viz.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/viz.js@2.1.2/full.render.js"></script>
 <!-- Marked (markdown parser) -->
 <script src="https://cdn.jsdelivr.net/npm/marked@9/marked.min.js"></script>
 <!-- Highlight.js -->
@@ -120,6 +126,23 @@ _HTML = r"""<!DOCTYPE html>
     color: var(--orange);
     border-color: #9e6a03;
     background: rgba(158, 106, 3, 0.1);
+  }
+
+  .action-btn {
+    appearance: none;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text);
+    border-radius: 999px;
+    padding: 6px 12px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .action-btn:hover {
+    border-color: var(--accent);
+    color: var(--accent);
   }
 
   .spacer { flex: 1; }
@@ -237,6 +260,45 @@ _HTML = r"""<!DOCTYPE html>
     overflow-x: auto;
   }
 
+  .md .svg-block {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 24px;
+    margin: 20px 0;
+    text-align: center;
+    overflow: auto;
+  }
+
+  .md .svg-block svg {
+    max-width: 100%;
+    height: auto;
+  }
+
+  .md .kroki-diagram {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 24px;
+    margin: 20px 0;
+    overflow: auto;
+  }
+
+  .md .kroki-diagram svg {
+    max-width: 100%;
+    height: auto;
+  }
+
+  .md .diagram-error {
+    color: var(--orange);
+    font-size: 13px;
+    margin-top: 12px;
+  }
+
+  .md .mermaid-source {
+    margin-top: 12px;
+  }
+
   /* ── Empty state ─────────────────────────────────────────────────────────── */
   #empty-state {
     display: flex;
@@ -278,6 +340,7 @@ _HTML = r"""<!DOCTYPE html>
   <span class="badge" id="model-badge">─</span>
   <span class="badge" id="msg-badge">─</span>
   <span class="spacer"></span>
+  <button id="copy-btn" class="action-btn" type="button" title="Copy current preview output">Copy</button>
   <span id="last-updated">Waiting for first response…</span>
   <span id="status-dot" class="stale" title="Live connection"></span>
 </div>
@@ -316,6 +379,60 @@ _HTML = r"""<!DOCTYPE html>
 
   let _lastTs = 0;
   let _pollFail = 0;
+  let _lastMarkdown = '';
+  let _mermaidSeq = 0;
+  const _viz = typeof Viz !== 'undefined' ? new Viz() : null;
+
+  function escapeHtml(text) {
+    return text
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  function showMermaidFallback(node, source, error) {
+    node.innerHTML =
+      `<pre class="mermaid-source"><code>${escapeHtml(source)}</code></pre>` +
+      `<div class="diagram-error">Mermaid preview could not render this diagram.${error ? ' ' + escapeHtml(String(error)) : ''}</div>`;
+  }
+
+  function createMermaidNode(code) {
+    const node = document.createElement('div');
+    node.className = 'mermaid';
+    node.textContent = code.trim();
+    return node;
+  }
+
+  async function copyCurrentOutput() {
+    const selected = window.getSelection ? String(window.getSelection()).trim() : '';
+    const text = selected || _lastMarkdown || document.getElementById('content').innerText || '';
+    if (!text) return;
+
+    const btn = document.getElementById('copy-btn');
+    const prev = btn.textContent;
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.focus();
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+      }
+      btn.textContent = 'Copied';
+    } catch (e) {
+      console.warn('copy failed:', e);
+      btn.textContent = 'Copy failed';
+    }
+    setTimeout(() => { btn.textContent = prev; }, 1200);
+  }
 
   function setHeader(data) {
     const p = document.getElementById('provider-badge');
@@ -331,29 +448,85 @@ _HTML = r"""<!DOCTYPE html>
   }
 
   async function render(markdown) {
-    // Pre-process: extract mermaid blocks before marked parses them
-    const placeholder = '__MERMAID_PLACEHOLDER__';
-    const mermaidBlocks = [];
-    const processed = markdown.replace(/```mermaid\n([\s\S]*?)```/g, (_, code) => {
-      mermaidBlocks.push(code.trim());
-      return `<div class="mermaid">${code.trim()}</div>`;
-    });
-
-    // Parse markdown (skip mermaid blocks — already converted)
-    const html = marked.parse(processed);
+    _lastMarkdown = markdown || '';
+    const pureMermaid = markdown.trim().match(/^```mermaid\s*\r?\n([\s\S]*?)```$/i);
     const el = document.getElementById('content');
-    el.innerHTML = html;
-    el.style.display = 'block';
-    el.classList.remove('fresh');
-    void el.offsetWidth; // force reflow
-    el.classList.add('fresh');
 
-    document.getElementById('empty-state').style.display = 'none';
+    if (pureMermaid) {
+      el.innerHTML = '';
+      el.appendChild(createMermaidNode(pureMermaid[1]));
+      el.style.display = 'block';
+      el.classList.remove('fresh');
+      void el.offsetWidth;
+      el.classList.add('fresh');
+      document.getElementById('empty-state').style.display = 'none';
+    } else {
+    // Pre-process visual blocks before marked parses them.
+    // Accept case variants and CRLF line endings because models are inconsistent.
+      const processed = markdown
+      .replace(/```mermaid\s*\r?\n([\s\S]*?)```/gi, (_, code) => {
+        return `<div class="mermaid">${code.trim()}</div>`;
+      })
+      .replace(/```svg\s*\r?\n([\s\S]*?)```/gi, (_, code) => {
+        return `<div class="svg-block">${code.trim()}</div>`;
+      })
+      .replace(/```(?:dot|graphviz)\s*\r?\n([\s\S]*?)```/gi, (_, code) => {
+        return `<div class="kroki-diagram" data-diagram-type="graphviz"><pre class="diagram-source" style="display:none">${escapeHtml(code.trim())}</pre></div>`;
+      })
+      .replace(/```(plantuml|d2)\s*\r?\n([\s\S]*?)```/gi, (_, type, code) => {
+        return `<div class="kroki-diagram" data-diagram-type="${type}"><pre class="diagram-source" style="display:none">${escapeHtml(code.trim())}</pre></div>`;
+      });
+
+      // Parse markdown (skip mermaid blocks — already converted)
+      const html = marked.parse(processed);
+      el.innerHTML = html;
+      el.style.display = 'block';
+      el.classList.remove('fresh');
+      void el.offsetWidth; // force reflow
+      el.classList.add('fresh');
+
+      document.getElementById('empty-state').style.display = 'none';
+    }
 
     // Render mermaid
-    try {
-      await mermaid.run({ nodes: document.querySelectorAll('.mermaid') });
-    } catch(e) { console.warn('mermaid:', e); }
+    const mermaidNodes = Array.from(document.querySelectorAll('.mermaid'));
+    for (const node of mermaidNodes) {
+      const source = node.textContent || '';
+      try {
+        const rendered = await mermaid.render(`forge-mermaid-${_mermaidSeq++}`, source);
+        node.innerHTML = rendered.svg;
+        if (rendered.bindFunctions) {
+          rendered.bindFunctions(node);
+        }
+      } catch(e) {
+        console.warn('mermaid:', e);
+        showMermaidFallback(node, source, e && e.message ? e.message : e);
+      }
+    }
+
+    // Render DOT locally in-browser and PlantUML/D2 via Kroki.
+    await Promise.all(Array.from(document.querySelectorAll('.kroki-diagram')).map(async (el) => {
+      const type = el.dataset.diagramType || '';
+      const source = el.querySelector('.diagram-source')?.textContent || '';
+      if (!source) return;
+      try {
+        if (type === 'graphviz' && _viz) {
+          el.innerHTML = await _viz.renderString(source);
+          return;
+        }
+        const endpoint = `https://kroki.io/${type}/svg`;
+        const resp = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+          body: source,
+        });
+        if (!resp.ok) throw new Error(`${type} ${resp.status}`);
+        el.innerHTML = await resp.text();
+      } catch (e) {
+        console.warn('diagram render:', type, e);
+        el.innerHTML = `<pre><code>${escapeHtml(source)}</code></pre><div class="diagram-error">Preview could not render this ${type} diagram.</div>`;
+      }
+    }));
 
     // Syntax-highlight code blocks
     document.querySelectorAll('pre code').forEach(block => {
@@ -383,6 +556,7 @@ _HTML = r"""<!DOCTYPE html>
   }
 
   // Poll every 800ms — snappy but not aggressive
+  document.getElementById('copy-btn').addEventListener('click', copyCurrentOutput);
   setInterval(poll, 800);
   poll();
 </script>
@@ -443,6 +617,8 @@ class _Handler(BaseHTTPRequestHandler):
             self._send(200, "text/html; charset=utf-8", _HTML.encode())
         elif self.path == "/state":
             self._send(200, "application/json", _state.to_json().encode())
+        elif self.path.startswith("/generated/"):
+            self._send_generated()
         else:
             self._send(404, "text/plain", b"Not Found")
 
@@ -453,6 +629,16 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-cache")
         self.end_headers()
         self.wfile.write(body)
+
+    def _send_generated(self):
+        rel = unquote(urlparse(self.path).path.removeprefix("/generated/"))
+        filename = Path(rel).name
+        path = GENERATED_DIR / filename
+        if not path.exists() or not path.is_file():
+            self._send(404, "text/plain", b"Not Found")
+            return
+        ctype = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+        self._send(200, ctype, path.read_bytes())
 
 
 class ForgePreview:

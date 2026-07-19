@@ -1,8 +1,8 @@
 # ⚒ Forge Router — Multi-LLM Orchestration Engine
 
-A terminal-first AI assistant that routes prompts across **11 LLM providers** with intent-based fallback chains, renders responses in a native macOS preview window, and maintains persistent conversation memory with RAG retrieval.
+A terminal-first AI assistant that routes prompts across **12 providers** with intent-based fallback chains, native image generation, a macOS preview window that renders Mermaid/Graphviz/PlantUML/D2, and persistent conversation memory with RAG retrieval.
 
-**v0.4.4** — Phase 0 complete (`forge_core` extracted) and Phase 1 gateway MVP underway (`forge_gateway/` — Anthropic-compatible `/v1/messages`, virtual keys, metering). See [`docs/ENTERPRISE-GATEWAY-EVALUATION.md`](docs/ENTERPRISE-GATEWAY-EVALUATION.md).
+**v0.5.1** — Phase 1 gateway MVP plus visual-routing upgrades: `forge_core` extracted, Anthropic-compatible gateway shipped, `visual` intent added, `openai_image` added for real image generation, and the preview now auto-opens for diagrams/media and includes a copy button. See [`docs/ENTERPRISE-GATEWAY-EVALUATION.md`](docs/ENTERPRISE-GATEWAY-EVALUATION.md).
 
 ---
 
@@ -15,7 +15,7 @@ graph TD
     Chat[ForgeChat REPL<br/>prompt-toolkit · Rich<br/>/file /repo /write /run]
     Router[RouterEngine<br/>intent classify → fallback chain<br/>60s wall-clock cap]
 
-    subgraph Providers [11 LLM Providers]
+    subgraph Providers [12 Providers]
         P0[Antigravity — Gemini Flash via agy CLI]
         P1[Cerebras — gpt-oss-120b]
         P2[Groq — gpt-oss-120B / LLaMA 3.3 70B]
@@ -26,7 +26,8 @@ graph TD
         P7[OpenRouter — R1 / Qwen / LLaMA]
         P8[Copilot — GitHub CLI]
         P9[OpenAI — GPT-4o]
-        P10[Ollama — Local CPU fallback]
+        P10[OpenAI Image — gpt-image-1]
+        P11[Ollama — Local CPU fallback]
     end
 
     subgraph Memory [Knowledge Base]
@@ -65,6 +66,7 @@ Prompts are classified in under 1ms (regex), then routed through the optimal pro
 | `summarization` | 20s | antigravity → groq → cerebras → claude → mistral → openrouter → openai → ollama |
 | `code` | 30s | codex → claude → hermes → openrouter → mistral → openai → groq → cerebras → ollama |
 | `reasoning` | 45s | hermes → claude → openrouter → mistral → openai → groq → cerebras → antigravity → ollama |
+| `visual` | 45s | image/photo prompts: openai_image → claude → openai → codex → openrouter → mistral → ollama; diagram prompts: claude → codex → openai → openrouter → mistral → groq → cerebras → ollama |
 | `agentic` | 60s | claude → openai → hermes → openrouter → groq → cerebras → mistral → antigravity → ollama |
 
 Unhealthy providers are skipped automatically. Conversation history, loaded file/repo context, and RAG memories all transfer intact across fallbacks — every provider in the chain receives the identical assembled prompt.
@@ -156,7 +158,9 @@ sequenceDiagram
 ```
 
 **Toggle:** `/p`, `/preview`, or `Ctrl+P`
-**Auto-open:** fires automatically when a response contains mermaid diagrams, images, or media
+**Auto-open:** fires automatically when a response contains mermaid diagrams, images, SVG, or media
+**Copy:** header button copies selected text or the full current preview output
+**Diagram renderers:** Mermaid direct, Graphviz via Viz.js, PlantUML/D2 via Kroki, SVG inline
 **Restore on open:** last response shown immediately — no blank window
 
 ---
@@ -198,7 +202,7 @@ uv sync && uv pip install -e .
 
 ### Credentials — single source of truth
 
-All API keys load from **`/Users/vikash/Documents/Projects/credentials/.env`** (falling back to a local `.env`). Parsed by `forge_core/config/settings.py` — keys are read once at startup and never logged or committed. How each of the 11 providers authenticates:
+All API keys load from **`/Users/vikash/Documents/Projects/credentials/.env`** (falling back to a local `.env`). Parsed by `forge_core/config/settings.py` — keys are read once at startup and never logged or committed. How each of the 12 providers authenticate:
 
 | Provider | Credential | Source |
 |---|---|---|
@@ -210,6 +214,7 @@ All API keys load from **`/Users/vikash/Documents/Projects/credentials/.env`** (
 | `codex` | `CODEX_API_KEY` (falls back to `OPENAI_API_KEY`) | credentials/.env |
 | `openrouter` | `OPENROUTER_API_KEY` | credentials/.env |
 | `copilot` | GitHub Copilot CLI login (`GITHUB_TOKEN`) | copilot CLI OAuth + credentials/.env |
+| `openai_image` | `OPENAI_API_KEY` (falls back to `CODEX_API_KEY`) | credentials/.env |
 | `antigravity` | none — `agy` CLI uses local OAuth | no key needed |
 | `ollama` | none — local inference | no key needed |
 
@@ -220,6 +225,7 @@ Verify everything with `forge doctor`.
 ```
 ~/.forge/
 ├── kb/               # FAISS + SQLite knowledge base (RAG memory)
+├── generated/        # images created by openai_image (gpt-image-1)
 ├── repo-memory/      # /repo session summaries for cross-session recall
 ├── logs/             # observability.jsonl — quality judge scores
 ├── results.md        # last preview content
@@ -237,7 +243,8 @@ forge                 # interactive chat (default)
 forge chat --model groq
 forge chat --preview  # open preview window immediately
 forge ask "Explain Qdrant vs FAISS for hybrid search"
-forge status          # provider health (all 11)
+forge ask "Generate a product icon for forge-router"
+forge status          # provider health (all 12)
 forge doctor          # diagnose keys + tools + health
 ```
 
@@ -252,7 +259,7 @@ forge doctor          # diagnose keys + tools + health
 | `/run <command>` | Run shell command, inject output as context |
 | `/p` `/preview` `Ctrl+P` | Toggle WKWebView preview window |
 | `/model <name\|auto>` | Lock to a provider / resume auto-routing |
-| `/image <path>` | Attach image for Vision |
+| `/image <path>` | Attach image input for Vision |
 | `/stats` `/kb` | Session stats + memory KB info |
 | `/status` `/models` | Provider health check |
 | `/clear` `/history` `/help` | Housekeeping |
@@ -269,7 +276,7 @@ forge_core/                 # ── the embeddable engine (gateway-ready) ─�
 ├── router/
 │   ├── engine.py           # RouterEngine, RoutingContext, intent chains
 │   └── observability.py    # Async LLM quality judge
-├── providers/              # 11 provider adapters (all extend BaseProvider)
+├── providers/              # 12 provider adapters (all extend BaseProvider)
 ├── memory/
 │   ├── knowledge_base.py   # FAISS + SQLite KB, auto-consolidation
 │   └── embedder.py         # Ollama nomic-embed-text wrapper
@@ -325,9 +332,11 @@ ANTHROPIC_BASE_URL=http://127.0.0.1:8099 ANTHROPIC_API_KEY=fk-... claude
 
 **Shipped:** `POST /v1/messages` (non-streaming), virtual keys (SHA-256 hashed,
 per-key model allow-lists), per-request usage metering into
-`~/.forge/gateway.db`, `/health`. Requests route through the full intent
-router to the cheapest healthy provider — so answers come from Forge's provider
-chain (Groq/Cerebras/…), **not** from Anthropic.
+`~/.forge/gateway.db`, `/health`, and the shared `forge_core` router that now
+supports a dedicated `visual` intent plus `openai_image` for real image output.
+Requests route through the full intent router to the cheapest healthy provider
+— so answers come from Forge's provider chain (Groq/Cerebras/…), **not** from
+Anthropic.
 
 **Not yet:** streaming (SSE), `POST /v1/chat/completions` (OpenAI), `GET /v1/models`,
 real provider-reported token counts (metering is a ~4-chars/token estimate).

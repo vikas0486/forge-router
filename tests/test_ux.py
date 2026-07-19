@@ -100,8 +100,22 @@ def test_visual_prompt_detection():
     from forge.chat import _wants_visual
     for p in ("draw a diagram of a fish", "make some ascii art", "generate an image of a cat",
               "Draw a mermaid flowchart", "create a video intro", "sketch the architecture",
-              "show me a photo", "plot the latency graph"):
+              "show me a photo", "plot the latency graph", "show the system architecture",
+              "draw a UML sequence diagram", "render this in graphviz", "show this as plantuml",
+              "draw this in d2"):
         assert _wants_visual(p), p
     for p in ("explain the routing engine", "fix this bug", "hello how are you",
               "write a bash script"):
         assert not _wants_visual(p), p
+
+
+def test_visual_content_detection():
+    """Visual output detection should catch diagram and SVG formats that the preview can render."""
+    from forge.chat import _has_visual
+    assert _has_visual("```mermaid\nflowchart TD\nA-->B\n```")
+    assert _has_visual("```Mermaid\r\nflowchart TD\r\nA-->B\r\n```")
+    assert _has_visual("```graphviz\ndigraph G { A -> B }\n```")
+    assert _has_visual("```plantuml\n@startuml\nA -> B\n@enduml\n```")
+    assert _has_visual("```svg\n<svg viewBox='0 0 10 10'></svg>\n```")
+    assert _has_visual("<svg viewBox='0 0 10 10'></svg>")
+    assert not _has_visual("plain markdown without diagrams")
