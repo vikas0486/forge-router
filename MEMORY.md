@@ -34,4 +34,5 @@ All under `~/.forge/`: `kb/` (FAISS+SQLite), `repo-memory/`, `logs/observability
 - Adaptive context fitting: each provider has `max_context_chars` (groq/hermes 32K, ollama 6K, claude 400K...); router relevance-trims file/repo context per provider (`shrink_context` in engine.py) — fixes Groq free-tier TPM 413s on big /repo loads
 
 ## Status
-v0.4.0 — Phase 0 complete + adaptive context fitting: `forge_core` extracted (gateway-ready engine). Next: Phase 1 FastAPI gateway (`/v1/messages` + `/v1/chat/completions`, virtual keys).
+v0.4.4 — Phase 0 complete + Phase 1 gateway MVP underway. `forge_core` extracted (gateway-ready engine). `forge_gateway/`: FastAPI Anthropic-compatible `POST /v1/messages` (non-streaming) + virtual keys (SHA-256, per-key model allow-lists) + usage metering to `~/.forge/gateway.db`. CLI: `forge gateway serve/keys/top`. 34 tests (was 27; +7 gateway). Deps: added fastapi + uvicorn direct. Requests route through the intent router to cheap providers, NOT to Anthropic.
+Next: streaming (SSE), `/v1/chat/completions` (OpenAI), `/v1/models`, real token counts.

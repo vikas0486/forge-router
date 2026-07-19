@@ -1,6 +1,6 @@
 [project]
 name = "forge-router"
-version = "0.4.4"
+version = "0.5.0"
 description = "🛠️ Forge: A high-performance AI Router & Interactive CLI in Python."
 authors = [
     { name = "Vikash Jaiswal", email = "vikashjaiswal.486@gmail.com" }
@@ -16,6 +16,8 @@ dependencies = [
     "python-dotenv>=1.0.1",
     "faiss-cpu>=1.14.3",
     "pywebview>=6.2.1",
+    "fastapi>=0.139.2",
+    "uvicorn>=0.51.0",
 ]
 readme = "README.md"
 requires-python = ">=3.13"

@@ -161,6 +161,94 @@ def models():
     """List all supported models and their current status."""
     status()
 
+# ── Gateway (Phase 1) ──────────────────────────────────────────────────────
+gateway_app = typer.Typer(help="Run the Forge gateway and manage virtual keys.")
+app.add_typer(gateway_app, name="gateway")
+
+
+@gateway_app.command("serve")
+def gateway_serve(
+    host: str = typer.Option("127.0.0.1", "--host", help="Bind address"),
+    port: int = typer.Option(8080, "--port", "-p", help="Port"),
+):
+    """Serve the Anthropic-compatible gateway.
+
+    Point Claude Code at it with:
+      ANTHROPIC_BASE_URL=http://HOST:PORT ANTHROPIC_API_KEY=fk-... claude
+    """
+    import uvicorn
+    from forge_gateway import create_app
+    from forge_gateway.compress import compression_available
+
+    console.print(f"[info]forge-gateway on http://{host}:{port}[/info]")
+    console.print(f"[info]compression: {'on' if compression_available() else 'off (headroom crusher unavailable)'}[/info]")
+    console.print(f"[info]Claude Code:[/info] ANTHROPIC_BASE_URL=http://{host}:{port} ANTHROPIC_API_KEY=<fk-key> claude")
+    uvicorn.run(create_app(), host=host, port=port, log_level="info")
+
+
+keys_app = typer.Typer(help="Manage gateway virtual keys.")
+gateway_app.add_typer(keys_app, name="keys")
+
+
+def _store():
+    from forge_gateway.store import GatewayStore
+    return GatewayStore()
+
+
+@keys_app.command("create")
+def keys_create(
+    name: str = typer.Argument(..., help="Unique name for the key"),
+    models: Optional[str] = typer.Option(None, "--models", help="Comma-separated allow-list (default: all)"),
+):
+    """Create a virtual key. The plaintext key is shown ONCE."""
+    allowed = [m.strip() for m in models.split(",")] if models else None
+    try:
+        key = _store().create_key(name, allowed_models=allowed)
+    except Exception as e:
+        console.print(f"[error]Could not create key:[/error] {e}")
+        raise typer.Exit(1)
+    console.print(f"[info]Virtual key '{name}' created — copy it now, it is not stored:[/info]")
+    console.print(f"\n  {key}\n")
+
+
+@keys_app.command("list")
+def keys_list():
+    """List virtual keys (prefixes only)."""
+    rows = _store().list_keys()
+    if not rows:
+        console.print("[info]No keys yet. Create one: forge gateway keys create <name>[/info]")
+        return
+    for r in rows:
+        state = "disabled" if r["disabled"] else "active"
+        allowed = ",".join(r["allowed_models"]) if r["allowed_models"] else "all"
+        console.print(f"  {r['prefix']}…  {r['name']:20} [{state}]  models={allowed}")
+
+
+@keys_app.command("revoke")
+def keys_revoke(name: str = typer.Argument(..., help="Key name to revoke")):
+    """Disable a virtual key by name."""
+    if _store().revoke(name):
+        console.print(f"[info]Revoked '{name}'.[/info]")
+    else:
+        console.print(f"[error]No key named '{name}'.[/error]")
+
+
+@gateway_app.command("top")
+def gateway_top(days: int = typer.Option(7, "--days", "-d", help="Window in days")):
+    """Show usage per virtual key (estimated tokens)."""
+    rows = _store().top(days=days)
+    if not rows:
+        console.print(f"[info]No usage in the last {days}d.[/info]")
+        return
+    console.print(f"[info]Usage — last {days}d (token counts are estimates):[/info]")
+    console.print(f"  {'key':20} {'reqs':>6} {'in_tok':>9} {'out_tok':>9} {'avg_ms':>8} {'ok':>5}")
+    for r in rows:
+        console.print(
+            f"  {r['key_name']:20} {r['requests']:>6} {r['prompt_tokens']:>9} "
+            f"{r['completion_tokens']:>9} {r['avg_latency_ms']:>8} {r['ok']:>5}"
+        )
+
+
 def main():
     """Entry point for the console script."""
     try:

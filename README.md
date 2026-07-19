@@ -2,7 +2,7 @@
 
 A terminal-first AI assistant that routes prompts across **11 LLM providers** with intent-based fallback chains, renders responses in a native macOS preview window, and maintains persistent conversation memory with RAG retrieval.
 
-**v0.2.0** — last CLI-only release. Next: evolution into an enterprise AI gateway — see [`docs/ENTERPRISE-GATEWAY-EVALUATION.md`](docs/ENTERPRISE-GATEWAY-EVALUATION.md).
+**v0.4.4** — Phase 0 complete (`forge_core` extracted) and Phase 1 gateway MVP underway (`forge_gateway/` — Anthropic-compatible `/v1/messages`, virtual keys, metering). See [`docs/ENTERPRISE-GATEWAY-EVALUATION.md`](docs/ENTERPRISE-GATEWAY-EVALUATION.md).
 
 ---
 
@@ -277,13 +277,18 @@ forge_core/                 # ── the embeddable engine (gateway-ready) ─�
     └── settings.py         # pydantic-settings, credential loading
 
 forge/                      # ── the CLI client ──
-├── cli.py                  # Typer entry point
+├── cli.py                  # Typer entry point (+ `gateway serve/keys/top`)
 ├── chat.py                 # ForgeChat REPL — context, preview, /write /run,
 │                           #   local-file bridge (auto-loads paths in prompts)
 └── ui/
     ├── console.py          # Rich terminal output
     ├── preview_server.py   # HTTP server + ForgePreview singleton
     └── preview_window.py   # pywebview WKWebView subprocess
+
+forge_gateway/              # ── the HTTP gateway (Phase 1 MVP) ──
+├── app.py                  # FastAPI create_app() — Anthropic /v1/messages, auth, metering
+├── store.py                # virtual keys (SHA-256) + usage — SQLite ~/.forge/gateway.db
+└── compress.py             # optional headroom SmartCrusher pass (degrades gracefully)
 ```
 
 ---
@@ -292,15 +297,40 @@ forge/                      # ── the CLI client ──
 
 Forge is evolving from a CLI router into a data-plane/control-plane AI gateway (virtual keys, OpenAI/Anthropic-compatible endpoints, cost metering, governance) while keeping this chat experience as its first client.
 
-| Phase | Deliverable |
-|---|---|
-| 0 — Extraction | `forge-core` package (router + providers, zero CLI imports) |
-| 1 — Gateway MVP | FastAPI `/v1/chat/completions` + `/v1/messages`, virtual keys, cost metering |
-| 2 — Governance | Teams, RBAC, budgets, dashboards, audit log |
-| 3 — Intelligence | Guardrails, semantic cache, judge-informed routing, MCP registry |
-| 4 — Enterprise | SSO/SCIM, Helm/HA, compliance tooling |
+| Phase | Deliverable | Status |
+|---|---|---|
+| 0 — Extraction | `forge-core` package (router + providers, zero CLI imports) | ✅ done |
+| 1 — Gateway MVP | FastAPI `/v1/chat/completions` + `/v1/messages`, virtual keys, cost metering | ⏳ in progress — `/v1/messages` + keys + metering shipped |
+| 2 — Governance | Teams, RBAC, budgets, dashboards, audit log | planned |
+| 3 — Intelligence | Guardrails, semantic cache, judge-informed routing, MCP registry | planned |
+| 4 — Enterprise | SSO/SCIM, Helm/HA, compliance tooling | planned |
 
 Full architecture: [`docs/ENTERPRISE-GATEWAY-EVALUATION.md`](docs/ENTERPRISE-GATEWAY-EVALUATION.md)
+
+### Gateway (Phase 1, current state)
+
+`forge_gateway/` is a FastAPI service that puts the router behind an
+Anthropic-compatible HTTP endpoint, so any Anthropic-SDK client (Claude Code,
+Cursor) can route through Forge with a virtual key instead of touching provider
+keys directly.
+
+```bash
+forge gateway keys create my-key         # prints an fk-... key once
+forge gateway serve --port 8099          # start the gateway
+forge gateway top                        # per-key usage (estimated tokens)
+
+# point a client at it:
+ANTHROPIC_BASE_URL=http://127.0.0.1:8099 ANTHROPIC_API_KEY=fk-... claude
+```
+
+**Shipped:** `POST /v1/messages` (non-streaming), virtual keys (SHA-256 hashed,
+per-key model allow-lists), per-request usage metering into
+`~/.forge/gateway.db`, `/health`. Requests route through the full intent
+router to the cheapest healthy provider — so answers come from Forge's provider
+chain (Groq/Cerebras/…), **not** from Anthropic.
+
+**Not yet:** streaming (SSE), `POST /v1/chat/completions` (OpenAI), `GET /v1/models`,
+real provider-reported token counts (metering is a ~4-chars/token estimate).
 
 ---
 
