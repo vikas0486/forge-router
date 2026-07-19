@@ -17,12 +17,12 @@ The objective of **Forge Router** is to build a terminal-first co-pilot that rou
 
 ## 2. Core Architecture & Project Layout
 
+Since v0.3.0 the engine lives in `forge_core` — an embeddable package with zero CLI/UI imports (enforced by `tests/test_forge_core.py`); `forge/` is the CLI client.
+
 ```
-forge/
-├── cli.py                  # Typer CLI entry point (status, doctor, ask, chat commands)
-├── chat.py                 # ForgeChat REPL (key bindings, preview toggle, history)
+forge_core/
 ├── router/
-│   ├── engine.py           # RouterEngine, RoutingContext, intent classifier
+│   ├── engine.py           # RouterEngine, RoutingContext, intent classifier, shrink_context, deep_probe
 │   └── observability.py    # Quality and latency scoring per provider
 ├── providers/              # 11 provider adapters (extending BaseProvider)
 │   ├── base.py             # Abstract BaseProvider and ProviderResponse class
@@ -38,14 +38,18 @@ forge/
 │   ├── codex.py            # Codex Responses API
 │   └── ollama.py           # Local Ollama fallback
 ├── memory/
-│   ├── knowledge_base.py   # FAISS Index + SQLite DB interaction recorder
+│   ├── knowledge_base.py   # FAISS Index + SQLite DB interaction recorder (data in ~/.forge/kb/)
 │   └── embedder.py         # Ollama nomic-embed-text wrapper
+└── config/
+    └── settings.py         # pydantic-settings; credentials/.env OVERRIDES shell env
+
+forge/
+├── cli.py                  # Typer CLI (status, doctor [--live], ask, chat)
+├── chat.py                 # ForgeChat REPL (local-file bridge, preview, /write /run)
 ├── ui/
 │   ├── console.py          # Rich terminal layouts and spinners
 │   ├── preview_server.py   # HTTP server state for live preview
 │   └── preview_window.py   # pywebview WKWebView subprocess
-└── config/
-    └── settings.py         # pydantic-settings, credentials loading
 ```
 
 ---
@@ -70,6 +74,11 @@ The [engine.py](file:///Users/vikash/Documents/Projects/forge-router/forge/route
 | **`agentic`** | `search`, `plan`, `execute`, `automate` | `claude` → `openai` → `hermes` → `openrouter` → `groq` → `cerebras` → `mistral` → `antigravity` → `ollama` |
 
 *   **Wall-Clock Timeout**: Enforces a strict `60s` limit per provider, switching immediately upon breach.
+*   **Adaptive Context Fitting**: every provider declares `max_context_chars`; `route()` relevance-trims file/repo context per provider (groq 24K … claude 200K), so tight free tiers work with huge `/repo` loads.
+*   **Local-File Bridge**: real file/dir paths typed in a chat prompt are auto-read locally and injected into context — cloud LLMs read local files through forge.
+*   **Deep Health Probe**: `forge doctor --live` (`RouterEngine.deep_probe`) sends a real generation to all providers concurrently, classifying CONFIG / RUNTIME / TIMEOUT failures.
+*   **Claude via subscription**: the `claude` provider shells out to `claude -p` (Claude Code CLI, paid subscription; scrubbed env, DEVNULL stdin, neutral cwd) — no prepaid API credits needed.
+*   **Groq intent routing**: gpt-oss-120b for code/reasoning/agentic (reasoning_effort=low), llama-3.3-70b for chat/summarization.
 
 ---
 
